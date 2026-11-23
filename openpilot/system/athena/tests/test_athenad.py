@@ -60,6 +60,9 @@ def host():
 
 class TestAthenadMethods(OpenpilotTestCase):
   def setup_method(self):
+    original_policy = athenad.route_upload_enabled
+    athenad.route_upload_enabled = lambda: True
+    self.addCleanup(setattr, athenad, "route_upload_enabled", original_policy)
     athenad.Api = MockApi  # ty: ignore[invalid-assignment]  # test double
     self.default_params = {
       "DongleId": "0000000000000000",

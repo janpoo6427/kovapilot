@@ -3,10 +3,12 @@
 import os
 import unittest
 
+from opendbc.car.structs import car
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.params import Params
 import openpilot.system.manager.manager as manager
 from openpilot.system.manager.process_config import managed_processes, procs
+from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled, route_upload_enabled
 from openpilot.common.hardware import HARDWARE
 
 os.environ['FAKEUPLOAD'] = "1"
@@ -25,6 +27,18 @@ class TestManager(OpenpilotTestCase):
 
   def test_duplicate_procs(self):
     assert len(procs) == len(managed_processes), "Duplicate process names"
+
+  def test_cloud_upload_processes_default_off(self):
+    params = Params()
+    CP = car.CarParams.new_message()
+
+    assert not comma_connect_enabled()
+    assert not route_upload_enabled()
+    assert not managed_processes["manage_athenad"].enabled
+    assert not managed_processes["uploader"].should_run(False, params, CP)
+    assert not managed_processes["uploader"].should_run(True, params, CP)
+    assert managed_processes["loggerd"].should_run(True, params, CP)
+    assert managed_processes["encoderd"].should_run(True, params, CP)
 
   def test_set_params_with_default_value(self):
     params = Params()

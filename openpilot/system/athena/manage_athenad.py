@@ -8,11 +8,16 @@ from openpilot.system.manager.process import launcher
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.version import get_build_metadata
+from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled
 
 ATHENA_MGR_PID_PARAM = "AthenadPid"
 
 
 def main():
+  if not comma_connect_enabled():
+    cloudlog.info("comma connect manager disabled by kovapilot policy")
+    return
+
   params = Params()
   dongle_id = params.get("DongleId")
   build_metadata = get_build_metadata()

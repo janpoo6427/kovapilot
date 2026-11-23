@@ -16,6 +16,7 @@ from openpilot.common.utils import get_upload_stream
 from openpilot.common.params import Params
 from openpilot.common.realtime import set_core_affinity
 from openpilot.common.hardware.hw import Paths
+from openpilot.kovapilot.bridges.cloud_upload import route_upload_enabled
 from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
 from openpilot.common.swaglog import cloudlog
 
@@ -138,6 +139,9 @@ class Uploader:
     return None
 
   def do_upload(self, key: str, fn: str):
+    if not route_upload_enabled():
+      raise RuntimeError("route uploads disabled by kovapilot policy")
+
     url_resp = self.api.get("v1.4/" + self.dongle_id + "/upload_url/", timeout=10, path=key, access_token=self.api.get_token())
     if url_resp.status_code == 412:
       return url_resp
@@ -161,6 +165,10 @@ class Uploader:
         stream.close()
 
   def upload(self, name: str, key: str, fn: str, network_type: int, metered: bool) -> bool:
+    if not route_upload_enabled():
+      cloudlog.info("route upload blocked by kovapilot policy")
+      return False
+
     try:
       sz = os.path.getsize(fn)
     except OSError:
@@ -227,6 +235,11 @@ class Uploader:
 def main(exit_event: threading.Event | None = None) -> None:
   if exit_event is None:
     exit_event = threading.Event()
+
+  # Check before touching route files, API credentials, sockets, or xattrs.
+  if not route_upload_enabled():
+    cloudlog.info("uploader disabled by kovapilot policy")
+    return
 
   try:
     set_core_affinity([0, 1, 2, 3])

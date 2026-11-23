@@ -45,6 +45,7 @@ from openpilot.tools.lib.helpers import RE
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled, route_upload_enabled
 from openpilot.system.athena.rpc import (boolean, dict_of, dispatcher, dumps_call, either, handle, integer, is_call, is_response,
                                          list_of, loads, number, one_of, regex, struct)
 
@@ -78,7 +79,7 @@ NetworkType = log.DeviceState.NetworkType
 UploadFileDict = dict[str, str | int | float | bool]
 UploadItemDict = dict[str, str | bool | int | float | dict[str, str]]
 
-UploadFilesToUrlResponse = dict[str, int | list[UploadItemDict] | list[str]]
+UploadFilesToUrlResponse = dict[str, int | str | list[UploadItemDict] | list[str]]
 
 # param validators for RPC inputs
 DATA_PATH = r'(?!.*\.\.)[\w\-.][\w\-./]*'  # relative to log root
@@ -282,6 +283,10 @@ def upload_handler(end_event: threading.Event) -> None:
   tid = threading.get_ident()
 
   while not end_event.is_set():
+    if not route_upload_enabled():
+      end_event.wait(1)
+      continue
+
     cur_upload_items[tid] = None
 
     try:
@@ -336,6 +341,9 @@ def upload_handler(end_event: threading.Event) -> None:
 
 
 def _do_upload(upload_item: UploadItem, callback: Callable | None = None) -> requests.Response:
+  if not route_upload_enabled():
+    raise RuntimeError("route uploads disabled by kovapilot policy")
+
   path = upload_item.path
   compress = False
 
@@ -636,6 +644,9 @@ def uploadFileToUrl(fn: str, url: str, headers: dict[str, str]) -> UploadFilesTo
 
 @dispatcher.add_method(files_data=list_of(UPLOAD_FILE))
 def uploadFilesToUrls(files_data: list[UploadFileDict]) -> UploadFilesToUrlResponse:
+  if not route_upload_enabled():
+    return {"enqueued": 0, "items": [], "error": "uploads disabled by kovapilot policy"}
+
   files = map(UploadFile.from_dict, files_data)
 
   items: list[UploadItemDict] = []
@@ -1023,6 +1034,10 @@ def backoff(retries: int) -> int:
 
 
 def main(exit_event: threading.Event | None = None):
+  if not comma_connect_enabled():
+    cloudlog.info("comma connect disabled by kovapilot policy")
+    return
+
   try:
     set_core_affinity([0, 1, 2, 3])
   except Exception:
