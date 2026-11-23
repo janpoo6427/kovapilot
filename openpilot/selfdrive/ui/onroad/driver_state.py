@@ -4,7 +4,8 @@ from openpilot.cereal import log
 from dataclasses import dataclass
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import FontWeight, gui_app
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
 AlertSize = log.SelfdriveState.AlertSize
@@ -52,6 +53,7 @@ class DriverStateRenderer(Widget):
     # Initial state with NumPy arrays
     self.face_kpts_draw = DEFAULT_FACE_KPTS_3D.copy()
     self.is_active = False
+    self.disable_reason = log.DriverMonitoringState.DisableReason.none
     self.is_rhd = False
     self.dm_fade_state = 0.0
     self.driver_pose_vals = np.zeros(3, dtype=np.float32)
@@ -71,6 +73,7 @@ class DriverStateRenderer(Widget):
 
     # Load the driver face icon
     self.dm_img = gui_app.texture("icons/driver_face.png", IMG_SIZE, IMG_SIZE)
+    self.font = gui_app.font(FontWeight.BOLD)
 
     # Colors
     self.white_color = rl.Color(255, 255, 255, 255)
@@ -79,9 +82,20 @@ class DriverStateRenderer(Widget):
     self.disengaged_color = rl.Color(139, 139, 139, 255)
 
     self.set_visible(lambda: (ui_state.sm["selfdriveState"].alertSize == AlertSize.none and
-                              ui_state.received_since_started("driverStateV2")))
+                              (ui_state.received_since_started("driverStateV2") or
+                               (ui_state.received_since_started("driverMonitoringState") and
+                                ui_state.sm["driverMonitoringState"].disableReason != log.DriverMonitoringState.DisableReason.none))))
 
   def _render(self, rect):
+    if self.disable_reason != log.DriverMonitoringState.DisableReason.none:
+      rl.draw_circle(int(self.position_x), int(self.position_y), BTN_SIZE // 2, rl.Color(150, 0, 0, 220))
+      label = "DM OFF"
+      size = 32
+      bounds = measure_text_cached(self.font, label, size)
+      rl.draw_text_ex(self.font, label, rl.Vector2(self.position_x - bounds.x / 2, self.position_y - size / 2),
+                      size, 0, rl.WHITE)
+      return
+
     # Set opacity based on active state
     opacity = 0.65 if self.is_active else 0.2
 
@@ -114,6 +128,11 @@ class DriverStateRenderer(Widget):
 
     # Get monitoring state
     dm_state = sm["driverMonitoringState"]
+    self.disable_reason = dm_state.disableReason
+    if self.disable_reason != log.DriverMonitoringState.DisableReason.none:
+      self.is_active = False
+      self._pre_calculate_drawing_elements()
+      return
     self.is_active = dm_state.activePolicy == log.DriverMonitoringState.MonitoringPolicy.vision
     self.is_rhd = dm_state.isRHD
 

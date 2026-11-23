@@ -7,7 +7,7 @@ from opendbc.car.structs import car
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.params import Params
 import openpilot.system.manager.manager as manager
-from openpilot.system.manager.process_config import managed_processes, procs
+from openpilot.system.manager.process_config import driver_monitoring_model, driverview, managed_processes, procs
 from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled, route_upload_enabled
 from openpilot.common.hardware import HARDWARE
 
@@ -39,6 +39,23 @@ class TestManager(OpenpilotTestCase):
     assert not managed_processes["uploader"].should_run(True, params, CP)
     assert managed_processes["loggerd"].should_run(True, params, CP)
     assert managed_processes["encoderd"].should_run(True, params, CP)
+
+  def test_driver_monitoring_session_disable_stops_only_model(self):
+    params = Params()
+    CP = car.CarParams.new_message()
+    params.put_bool("IsDriverViewEnabled", False, block=True)
+    params.remove("DriverMonitoringSessionDisabled")
+
+    assert driver_monitoring_model(True, params, CP)
+    assert driverview(True, params, CP)
+
+    params.put_bool("DriverMonitoringSessionDisabled", True, block=True)
+    assert not driver_monitoring_model(True, params, CP)
+    assert driverview(True, params, CP)
+
+    params.put_bool("IsDriverViewEnabled", True, block=True)
+    assert driver_monitoring_model(False, params, CP)
+    assert driverview(False, params, CP)
 
   def test_set_params_with_default_value(self):
     params = Params()
