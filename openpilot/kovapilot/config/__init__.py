@@ -1,0 +1,1 @@
+"""kovapilot configuration contracts."""

@@ -23,7 +23,8 @@ import urllib.request
 
 POINTER_VERSION = "https://git-lfs.github.com/spec/v1"
 POINTER_RE = re.compile(rb"\Aversion " + POINTER_VERSION.encode() + rb"\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n\Z")
-BUCKET = os.environ.get("OPENPILOT_LFS_BUCKET", "commaai/openpilot-lfs")
+SOURCE_BUCKET = os.environ.get("OPENPILOT_LFS_BUCKET", "commaai/openpilot-lfs")
+CUSTOM_BUCKET = os.environ.get("KOVAPILOT_LFS_BUCKET")
 ZERO = "0" * 40
 RANGES = 8
 RANGE_MIN = 16 << 20
@@ -172,27 +173,32 @@ def hf_request(url, **kwargs):
   return request
 
 
-def object_info(objects):
+def download_buckets():
+  return tuple(dict.fromkeys(bucket for bucket in (SOURCE_BUCKET, CUSTOM_BUCKET) if bucket))
+
+
+def object_info(objects, bucket=SOURCE_BUCKET):
   keys = [f"sha256/{oid}" for oid in objects]
   found = {}
   for start in range(0, len(keys), 1000):
-    request = hf_request(f"https://huggingface.co/api/buckets/{BUCKET}/paths-info",
+    request = hf_request(f"https://huggingface.co/api/buckets/{bucket}/paths-info",
                          data=json.dumps({"paths": keys[start:start + 1000]}).encode(), headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=30) as response:
       found.update((item["path"], item["size"]) for item in json.load(response))
   return found
 
 
-def download_http(oid, size, path, span=None):
+def download_http_from_bucket(oid, size, path, bucket, span=None):
   ranges = min(RANGES, max(1, (size + RANGE_MIN - 1) // RANGE_MIN))
   if span is None and ranges > 1:
     # each range writes its own slice of one preallocated file
     with path.open("wb") as out:
       out.truncate(size)
-    parallel(download_http, [(oid, size, path, (i * size // ranges, (i + 1) * size // ranges - 1)) for i in range(ranges)], ranges)
+    parallel(download_http_from_bucket,
+             [(oid, size, path, bucket, (i * size // ranges, (i + 1) * size // ranges - 1)) for i in range(ranges)], ranges)
     return
 
-  request = hf_request(f"https://huggingface.co/buckets/{BUCKET}/resolve/sha256/{oid}")
+  request = hf_request(f"https://huggingface.co/buckets/{bucket}/resolve/sha256/{oid}")
   if span is not None:
     request.add_header("Range", f"bytes={span[0]}-{span[1]}")
   expected_size = size if span is None else span[1] - span[0] + 1
@@ -214,6 +220,18 @@ def download_http(oid, size, path, span=None):
       if not retryable or attempt == 3:
         raise
       time.sleep(2 ** attempt)
+
+
+def download_http(oid, size, path):
+  missing = []
+  for bucket in download_buckets():
+    try:
+      return download_http_from_bucket(oid, size, path, bucket)
+    except urllib.error.HTTPError as error:
+      if error.code != 404:
+        raise
+      missing.append(bucket)
+  raise RuntimeError(f"LFS object {oid} was not found in: {', '.join(missing)}")
 
 
 def download_one(oid, size):
@@ -415,9 +433,9 @@ def pull(exclude=None):
     git("update-index", "-q", "--refresh", check=False)
 
 
-def bucket_request(path, data=None):
+def bucket_request(bucket, path, data=None):
   headers = {"Content-Type": "application/x-ndjson"} if data is not None else {}
-  request = hf_request(f"https://huggingface.co/api/buckets/{BUCKET}/{path}", data=data, headers=headers)
+  request = hf_request(f"https://huggingface.co/api/buckets/{bucket}/{path}", data=data, headers=headers)
   for attempt in range(4):
     try:
       with urllib.request.urlopen(request, timeout=30) as response:
@@ -429,9 +447,9 @@ def bucket_request(path, data=None):
       time.sleep(2 ** attempt)
 
 
-def upload_xet(objects, upload_files):
+def upload_xet(objects, upload_files, bucket):
   def connection():
-    _, headers = bucket_request("xet-write-token")
+    _, headers = bucket_request(bucket, "xet-write-token")
     return headers["X-Xet-Cas-Url"], (headers["X-Xet-Access-Token"], int(headers["X-Xet-Token-Expiration"]))
 
   oids = list(objects)
@@ -443,14 +461,14 @@ def upload_xet(objects, upload_files):
     payload = b"".join(json.dumps({"type": "addFile", "path": f"sha256/{oid}", "xetHash": info.hash,
                                   "mtime": int(path.stat().st_mtime * 1000)}).encode() + b"\n"
                        for oid, path, info in zip(batch, paths, infos, strict=True))
-    bucket_request("batch", payload)
+    bucket_request(bucket, "batch", payload)
 
 
-def upload(objects):
+def upload(objects, bucket):
   objects = dict(objects)
   if not objects:
     return
-  existing = object_info(objects)
+  existing = object_info(objects, bucket)
   pending = {}
   for oid, size in objects.items():
     key = f"sha256/{oid}"
@@ -471,8 +489,8 @@ def upload(objects):
       raise RuntimeError(f"missing local LFS object {oid}")
     if hash_file(path) != oid:
       raise RuntimeError(f"local sha256 mismatch for {oid}")
-  upload_xet(pending, upload_files)
-  uploaded = object_info(pending)
+  upload_xet(pending, upload_files, bucket)
+  uploaded = object_info(pending, bucket)
   for oid, size in pending.items():
     if uploaded.get(f"sha256/{oid}") != size:
       raise RuntimeError(f"uploaded object {oid} is missing or has the wrong size")
@@ -488,13 +506,30 @@ def pre_push(remote):
     return
   output = git("rev-list", "--objects", "--no-object-names", *local_oids, "--not", f"--remotes={remote}")
   object_ids = output.decode().splitlines()
-  objects = [parsed for _oid, data in cat_small(object_ids) if (parsed := parse_pointer(data))]
+  objects = dict(parsed for _oid, data in cat_small(object_ids) if (parsed := parse_pointer(data)))
+  if not objects:
+    return
+  source_objects = object_info(objects, SOURCE_BUCKET)
+  custom_objects = {}
+  for oid, size in objects.items():
+    key = f"sha256/{oid}"
+    if key in source_objects:
+      if source_objects[key] != size:
+        raise RuntimeError(f"invalid source bucket object {oid}: size {source_objects[key]}, expected {size}")
+      continue
+    custom_objects[oid] = size
+  if not custom_objects:
+    return
+  if not CUSTOM_BUCKET:
+    sys.exit(" ".join(("lfs.py: new LFS objects are not in the source bucket; set KOVAPILOT_LFS_BUCKET",
+                       "to your writable Hugging Face bucket before pushing")))
   try:
-    upload(objects)
+    upload(custom_objects, CUSTOM_BUCKET)
   except urllib.error.HTTPError as error:
     if error.code not in (401, 403):
       raise
-    sys.exit(f"lfs.py: uploading LFS objects to {BUCKET} needs a Hugging Face token with write access (hf auth login, or set HF_TOKEN)")
+    sys.exit(" ".join((f"lfs.py: uploading LFS objects to {CUSTOM_BUCKET} needs a Hugging Face token with write access",
+                       "(hf auth login, or set HF_TOKEN)")))
 
 
 def main():
