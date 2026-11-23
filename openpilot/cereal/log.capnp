@@ -2214,6 +2214,13 @@ struct DriverMonitoringState {
 
   visionPolicyState @9 :VisionPolicyState;
   wheeltouchPolicyState @10 :WheeltouchPolicyState;
+  disableReason @16 :DisableReason;
+
+  enum DisableReason {
+    none @0;
+    session @1;
+    buildConfig @2;
+  }
 
   enum AlertLevel {
     # ordinal must match the name to prevent bugs

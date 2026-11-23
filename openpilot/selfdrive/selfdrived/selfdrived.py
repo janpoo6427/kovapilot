@@ -15,6 +15,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
+from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -129,6 +130,7 @@ class SelfdriveD:
     self.startup_cruise_checked = False
     self.dm_lockout_set = False
     self.dm_uncertain_alerted = False
+    self.dm_disabled_prev = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
@@ -213,7 +215,12 @@ class SelfdriveD:
       self.events.add(EventName.resumeBlocked)
 
     # Handle DM
-    if not self.CP.notCar:
+    dm_disabled = monitoring_is_disabled(self.sm)
+    if dm_disabled and not self.dm_disabled_prev:
+      set_offroad_alert("Offroad_DriverMonitoringUncertain", False)
+      self.dm_uncertain_alerted = False
+    self.dm_disabled_prev = dm_disabled
+    if not self.CP.notCar and not dm_disabled:
       # Block engaging until lockout times out or ignition reset
       if self.sm['driverMonitoringState'].lockout and not self.dm_lockout_set:
         self.params.put_bool("DriverTooDistracted", True)
