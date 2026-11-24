@@ -19,6 +19,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.kovapilot.config.longitudinal_personality import migrate_longitudinal_personality
 
 
 def manager_init() -> None:
@@ -45,6 +46,10 @@ def manager_init() -> None:
     default_value = params.get_default_value(k)
     if default_value is not None and params.get(k) is None:
       params.put(k, default_value, block=True)
+
+  # Older forks may persist personality values outside the upstream enum.
+  # Normalize before UI/selfdrived start so a stale value cannot crash either.
+  migrate_longitudinal_personality(params)
 
   # Create folders needed for msgq
   try:

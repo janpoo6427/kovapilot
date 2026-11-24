@@ -7,6 +7,7 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
@@ -262,7 +263,7 @@ class UIState:
     self.is_metric = self.params.get_bool("IsMetric")
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
-    self.personality_param = self.params.get("LongitudinalPersonality", return_default=True)
+    self.personality_param = get_longitudinal_personality(self.params)
     self.navigation_enabled = self.params.get_bool("NavigationEnabled")
     self.nav_destination_set = self.params.get("NavDestination") is not None
     self.chestnut_active = self.params.get("ChestnutActive")
