@@ -1,6 +1,6 @@
 # IONIQ 9 exact-evidence lateral control
 
-Status: superseded by `IONIQ9_PORTING_STATUS.md`; implementation remains default off and vehicle active-control NO-GO.
+Status: historical vehicle-profile evidence; superseded by `HYUNDAI_CANFD_ADAS_CONTROL_STATUS.md` for the generic control program.
 
 ## Scope
 
@@ -73,7 +73,7 @@ Latest local regression bundle:
 - Ruff passed
 - `git diff --check` passed
 
-The consolidated branch subsequently completed the full macOS SCons build after selecting the project Python/Cap'n Proto tools, materializing SHA-256-verified public LFS models with implicit HF token use disabled, and allowing the local Metal compile outside the sandbox. See `IONIQ9_PORTING_STATUS.md` for the current regression counts and exact commit.
+The consolidated branch subsequently completed the full macOS SCons build after selecting the project Python/Cap'n Proto tools, materializing SHA-256-verified public LFS models with implicit HF token use disabled, and allowing the local Metal compile outside the sandbox. See `HYUNDAI_CANFD_ADAS_CONTROL_STATUS.md` for the current regression counts and exact commit.
 
 ## Release and vehicle gate
 

@@ -1,18 +1,22 @@
-# IONIQ 9 consolidated porting status
+# Hyundai CAN-FD ADAS-harness angle and longitudinal control
 
 Status: canonical implementation branch, default off, vehicle actuation NO-GO.
 
+## Program scope
+
+The target is openpilot engagement plus lateral and longitudinal control on Hyundai CAN-FD platforms that use angle steering and an ADAS-harness connection. IONIQ 9 is the first evidence-backed vehicle profile, not the runtime program name or a generic authorization for other vehicles.
+
 ## Canonical branch
 
-- kovapilot: `feature/ioniq9-port`
-- owning opendbc: `feature/ioniq9-port@9c88c8f3`
+- kovapilot: `feature/hyundai-canfd-adas-control`
+- owning opendbc: `feature/hyundai-canfd-adas-control@9c88c8f3`
 - base kovapilot master: `6105e1e1d`
 
-This branch supersedes the implementation branches `feature/ioniq9-active-control`, `feature/ioniq9-angle-o4`, and the temporary local ADAS-long profile branch. The angle-o4 implementation is retained only as comparison evidence; its alternative controller/safety code is not merged into the canonical runtime.
+This branch supersedes the implementation branches `feature/ioniq9-port`, `feature/ioniq9-active-control`, `feature/ioniq9-angle-o4`, and the temporary local ADAS-long profile branch. The angle-o4 implementation is retained only as comparison evidence; its alternative controller/safety code is not merged into the canonical runtime.
 
 ## Selection contract
 
-Runtime behavior is selected from typed capability, exact radar/camera/ADAS firmware, and passive bus-role/address/DLC evidence. A vehicle-name branch or the presence of `0xCB` alone never authorizes output.
+Runtime behavior is selected from typed capability, exact radar/camera/ADAS firmware, and passive bus-role/address/DLC evidence. A vehicle-name branch or the presence of `0xCB` alone never authorizes output. Every additional vehicle must define and validate its own evidence-backed profile.
 
 If exact evidence is absent or different, the interface selects `dashcamOnly + SafetyModel.noOutput`. Carrot and Sunny remain wire-behavior and test-structure references, not safety authorities. Carrot safety relaxations are not included.
 
@@ -20,7 +24,7 @@ If exact evidence is absent or different, the interface selects `dashcamOnly + S
 
 The lateral path sends only `LFA_ALT 0xCB`, ECAN bus 0, DLC 24, nominal 100 Hz. It preserves the stock camera FCA/ESA payload and replaces only counter, angle state, requested angle, gain, and checksum.
 
-The panda contract checks exact address/bus/DLC, stock payload, CRC, counter, frequency, forwarding/relay state, driver torque, MDPS angle/fault state, measured error, active state/gain, and angle/rate limits. Active control is bounded inside ±60 degrees; inactive output follows measured angle with zero authority.
+The panda contract checks exact address/bus/DLC, stock payload, CRC, counter, frequency, forwarding/relay state, driver torque, MDPS angle/fault state, measured error, active state/gain, and angle/rate limits. The initial validated profile bounds active control inside ±60 degrees; inactive output follows measured angle with zero authority.
 
 The bursty HDA2 blind-spot frame is decoded without making the full powertrain parser invalid while it is quiet.
 
@@ -28,7 +32,7 @@ The bursty HDA2 blind-spot frame is decoded without making the full powertrain p
 
 Longitudinal remains behind `ENABLE_CANFD_LONGITUDINAL_STAGING = False`. Enabling it requires a source change and new build; no Param or KovaLink setting can enable it.
 
-Even with the source flag changed, activation additionally requires the development opt-in and exact `CANFD_LONGITUDINAL_CANDIDATE` evidence. The candidate describes an ADAS physical harness with stock SCC on CAM and replacement SCC on ECAN, without ECU disable or diagnostic traffic.
+Even with the source flag changed, activation additionally requires the development opt-in and exact `CANFD_LONGITUDINAL_CANDIDATE` evidence. The initial profile describes an ADAS physical harness with stock SCC on CAM and replacement SCC on ECAN, without ECU disable or diagnostic traffic.
 
 The staged controller output is limited to:
 
@@ -50,7 +54,7 @@ The public LFS download was run with implicit Hugging Face token use disabled an
 
 ## Offline shadow boundary
 
-The MacBook workspace currently has no local full IONIQ 9 rlog. Unit/contract shadow generation is covered, but route-level stock-versus-generated `0x1A0` diff and AEB/FCW event replay cannot be claimed until a private full rlog is made available locally. Raw route data, identifiers, location, and video stay outside Git and Vault.
+The MacBook workspace currently has no local full route for the initial vehicle profile. Unit/contract shadow generation is covered, but route-level stock-versus-generated `0x1A0` diff and AEB/FCW event replay cannot be claimed until a private full rlog is made available locally. Raw route data, identifiers, location, and video stay outside Git and Vault.
 
 ## Remaining blockers
 
