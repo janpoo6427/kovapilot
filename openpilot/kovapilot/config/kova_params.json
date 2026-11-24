@@ -1,0 +1,36 @@
+{
+  "$schema": "./kova_params.schema.json",
+  "schemaVersion": 1,
+  "defaultLocale": "ko",
+  "locales": ["ko", "en"],
+  "groups": [
+    {
+      "id": "steering",
+      "order": 100,
+      "title": {"ko": "조향", "en": "Steering"},
+      "description": {
+        "ko": "차량의 횡방향 제어와 관련된 사용자 설정입니다.",
+        "en": "User settings related to lateral vehicle control."
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "steering.always_on",
+      "groupId": "steering",
+      "order": 100,
+      "type": "boolean",
+      "defaultValue": false,
+      "title": {"ko": "항시 조향", "en": "Always-on steering"},
+      "description": {
+        "ko": "지원되는 차량과 안전 조건에서 종방향 크루즈 상태와 독립적으로 조향 보조를 사용할 수 있도록 요청합니다. 실제 적용에는 별도의 차량 기능 소비자와 안전 검증이 필요합니다.",
+        "en": "Requests steering assistance independently of longitudinal cruise state when vehicle support and safety conditions allow. Activation requires a separate vehicle-capability consumer and safety validation."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "availability": "pendingConsumer",
+      "requiredCapabilities": ["alwaysSteering"]
+    }
+  ]
+}
