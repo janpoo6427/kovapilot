@@ -38,6 +38,9 @@ dependencies = [
   "PyJWT[crypto]",
   "websocket_client",
 
+  # KovaLink local gateway
+  "aiohttp>=3.12,<4",
+
   # joystickd
   "inputs",
 

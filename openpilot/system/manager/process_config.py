@@ -60,6 +60,9 @@ def always_run(started: bool, params: Params, CP: car.CarParams) -> bool:
 def cloud_upload(started: bool, params: Params, CP: car.CarParams) -> bool:
   return route_upload_enabled()
 
+def kovalink_gateway(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return params.get_bool("KovaLinkGatewayEnabled")
+
 def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started
 
@@ -125,6 +128,7 @@ procs = [
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "openpilot.system.loggerd.uploader", cloud_upload),
+  PythonProcess("kovalink_gateway", "openpilot.kovapilot.gateway", kovalink_gateway),
 
   # debug procs
   PythonProcess("webrtcd", "openpilot.system.webrtc.webrtcd", or_(livestream, notcar)),
