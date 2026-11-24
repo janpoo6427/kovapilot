@@ -16,7 +16,7 @@ Lateral staging requires all of the following:
 2. Every required passive bus-role/address/DLC tuple matches.
 3. The existing development-mode opt-in is enabled.
 
-Without the opt-in, or if any evidence is missing or different, the interface selects `dashcamOnly` and `SafetyModel.noOutput`. The ordinary development opt-in authorizes lateral staging only. With the source-level longitudinal staging flag at its default `False`, the interface clears the LONG safety bit and forces:
+Lateral staging requires the reviewed source gate, a non-release build, and exact firmware/topology evidence. If the source gate is off, the build is a release, or any evidence is missing or different, the interface selects `dashcamOnly` and `SafetyModel.noOutput`. With the independent source-level longitudinal staging flag at its default `False`, the interface clears the LONG safety bit and forces:
 
 - `alphaLongitudinalAvailable=False`
 - `openpilotLongitudinalControl=False`
