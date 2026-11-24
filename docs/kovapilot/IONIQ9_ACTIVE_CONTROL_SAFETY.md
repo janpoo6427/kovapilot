@@ -1,10 +1,10 @@
 # IONIQ 9 exact-evidence lateral control
 
-Status: implementation under review, default off, vehicle active-control NO-GO.
+Status: superseded by `IONIQ9_PORTING_STATUS.md`; implementation remains default off and vehicle active-control NO-GO.
 
 ## Scope
 
-This change adds a capability-driven Hyundai CAN-FD `LFA_ALT` angle-control path for the observed Korean IONIQ 9 configuration. It does not port Carrot safety relaxations, longitudinal control, HUD/CCNC replacement, TCS/MDPS retransmission, radar writes, ECU disable, communication-control, or tester-present traffic.
+This change introduced the capability-driven Hyundai CAN-FD `LFA_ALT` angle-control path for the observed Korean IONIQ 9 configuration. The consolidated branch also contains a separately gated longitudinal staging implementation. It does not port Carrot safety relaxations, HUD/CCNC replacement, TCS/MDPS retransmission, radar writes, ECU disable, communication-control, or tester-present traffic.
 
 The observed Carrot behavior is a packet and topology reference, not a safety authority.
 
@@ -16,7 +16,7 @@ Lateral staging requires all of the following:
 2. Every required passive bus-role/address/DLC tuple matches.
 3. The existing development-mode opt-in is enabled.
 
-Without the opt-in, or if any evidence is missing or different, the interface selects `dashcamOnly` and `SafetyModel.noOutput`. The opt-in authorizes lateral staging only. The interface clears the LONG safety bit and forces:
+Without the opt-in, or if any evidence is missing or different, the interface selects `dashcamOnly` and `SafetyModel.noOutput`. The ordinary development opt-in authorizes lateral staging only. With the source-level longitudinal staging flag at its default `False`, the interface clears the LONG safety bit and forces:
 
 - `alphaLongitudinalAvailable=False`
 - `openpilotLongitudinalControl=False`
@@ -30,7 +30,7 @@ The lateral safety allowlist contains one command:
 
 - `0xCB`, bus 0 (ECAN), DLC 24, nominal 100 Hz
 
-Stock camera `0xCB` on bus 2 is received with checksum/counter/liveness validation and blocked from forwarding while the replacement is active. Stock `0x1A0` is not blocked and continues to provide factory ACC/braking behavior.
+Stock camera `0xCB` on bus 2 is received with checksum/counter/liveness validation and blocked from forwarding while the replacement is active. In the default lateral-only mode, stock `0x1A0` is not blocked and continues to provide factory ACC/braking behavior.
 
 The replacement changes only counter, angle-control state, requested angle, and angle torque-reduction gain. Bytes 7–23, including FCA/ESA fields, must exactly match the latest valid stock camera frame. No `0x12A`, `0x1A0`, button, TCS, MDPS, HUD, or diagnostic command is permitted by this profile.
 
@@ -73,7 +73,7 @@ Latest local regression bundle:
 - Ruff passed
 - `git diff --check` passed
 
-SCons progressed through Cap'n Proto, DBC generation, Cereal, CAN, and common targets. The full macOS build stopped in model generation because the sandbox could not allocate a Metal command queue and a local model artifact could not be parsed. This is not counted as a successful full build.
+The consolidated branch subsequently completed the full macOS SCons build after selecting the project Python/Cap'n Proto tools, materializing SHA-256-verified public LFS models with implicit HF token use disabled, and allowing the local Metal compile outside the sandbox. See `IONIQ9_PORTING_STATUS.md` for the current regression counts and exact commit.
 
 ## Release and vehicle gate
 
