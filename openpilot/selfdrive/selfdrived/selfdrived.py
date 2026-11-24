@@ -16,6 +16,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
+from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -125,7 +126,7 @@ class SelfdriveD:
     self.events_prev = []
     self.logged_comm_issue = None
     self.not_running_prev = None
-    self.personality = self.params.get("LongitudinalPersonality", return_default=True)
+    self.personality = get_longitudinal_personality(self.params)
     self.recalibrating_seen = False
     self.startup_cruise_checked = False
     self.dm_lockout_set = False
@@ -581,7 +582,7 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      self.personality = self.params.get("LongitudinalPersonality", return_default=True)
+      self.personality = get_longitudinal_personality(self.params)
       time.sleep(0.1)
 
   def run(self):
