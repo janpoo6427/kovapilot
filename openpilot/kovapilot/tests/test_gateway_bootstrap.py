@@ -32,12 +32,15 @@ def test_runtime_stages_locked_packages_and_reuses_them(tmp_path, monkeypatch):
     assert "--offline" in command
     if "export" in command:
       assert "kovalink-gateway" in command
-      kwargs["stdout"].write(b"locked packages")
+      return subprocess.CompletedProcess(command, 0, stdout=b"locked packages")
     else:
       assert "--no-index" in command
       assert command[command.index("--find-links") + 1] == str(runtime.DEVICE_WHEELS)
       assert "--require-hashes" in command
+      assert command[-2:] == ["-r", "-"]
+      assert kwargs["input"] == b"locked packages"
       target = Path(command[command.index("--target") + 1])
+      assert target.parent == directory.parent
       package = target / "aiohttp"
       package.mkdir(parents=True)
       (package / "__init__.py").touch()
@@ -56,8 +59,7 @@ def test_failed_install_does_not_publish_a_runtime(tmp_path, monkeypatch):
 
   def fake_run(command, **kwargs):
     if "export" in command:
-      kwargs["stdout"].write(b"locked packages")
-      return
+      return subprocess.CompletedProcess(command, 0, stdout=b"locked packages")
     target = Path(command[command.index("--target") + 1])
     (target / "aiohttp").mkdir(parents=True)
     raise subprocess.TimeoutExpired(command, timeout=1)

@@ -12,8 +12,9 @@ def prepare_runtime() -> None:
   while True:
     try:
       install_runtime()
-    except (OSError, ValueError, subprocess.SubprocessError):
-      cloudlog.warning("KovaLink Gateway runtime preparation failed; retrying")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+      code = getattr(error, "errno", None) or getattr(error, "returncode", None)
+      cloudlog.warning(f"KovaLink Gateway runtime preparation failed ({type(error).__name__}, code {code}). Retrying.")
       time.sleep(60)
     else:
       return

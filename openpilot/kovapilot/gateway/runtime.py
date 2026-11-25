@@ -82,19 +82,18 @@ def install_runtime(directory: Path = DEVICE_PACKAGES) -> None:
       return
     with tempfile.TemporaryDirectory(dir=directory.parent) as temporary:
       staging = Path(temporary)
-      requirements = staging / "requirements.txt"
-      with requirements.open("wb") as exported:
-        subprocess.run(
-          ["uv", "--offline", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
-           "--format", "requirements-txt"],
-          cwd=BASEDIR, stdout=exported, check=True, timeout=15,
-        )
-      target = staging / "python"
+      requirements = subprocess.run(
+        ["uv", "--offline", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
+         "--format", "requirements-txt"],
+        cwd=BASEDIR, stdout=subprocess.PIPE, check=True, timeout=15,
+      ).stdout
       subprocess.run(
-        ["uv", "--offline", "pip", "install", "--python", sys.executable, "--target", str(target),
+        ["uv", "--offline", "pip", "install", "--python", sys.executable, "--target", str(staging),
          "--no-index", "--find-links", str(DEVICE_WHEELS),
-         "--require-hashes", "--only-binary=:all:", "-r", str(requirements)],
-        cwd=BASEDIR, check=True, timeout=120,
+         "--require-hashes", "--only-binary=:all:", "-r", "-"],
+        cwd=BASEDIR, input=requirements, check=True, timeout=120,
       )
-      check_runtime(target)
-      target.rename(directory)
+      check_runtime(staging)
+      # In AGNOS the installer can leave a target owned by a different user.
+      # Renaming in the same parent avoids rewriting the directory's .. entry.
+      staging.rename(directory)

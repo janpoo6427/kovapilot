@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-import numpy as np
-from functools import cache
 import threading
+import time
+from functools import cache
+
+import numpy as np
 
 from openpilot.cereal import messaging
 from openpilot.common.realtime import Ratekeeper
-from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
 RATE = 10
@@ -102,22 +103,39 @@ class Mic:
 
         self.measurements = self.measurements[FFT_SAMPLES:]
 
-  @retry(attempts=10, delay=3)
   def get_stream(self, sd):
     # reload sounddevice to reinitialize portaudio
     sd._terminate()
     sd._initialize()
-    return sd.InputStream(channels=1, samplerate=SAMPLE_RATE, callback=self.callback, blocksize=SAMPLE_BUFFER)
+    stream = sd.InputStream(channels=1, samplerate=SAMPLE_RATE, callback=self.callback, blocksize=SAMPLE_BUFFER)
+    try:
+      stream.start()
+    except BaseException:
+      stream.close()
+      raise
+    return stream
 
   def micd_thread(self):
     # sounddevice must be imported after forking processes
     import sounddevice as sd
     patch_sounddevice(sd)
 
-    with self.get_stream(sd) as stream:
+    while True:
+      try:
+        stream = self.get_stream(sd)
+        break
+      except sd.PortAudioError as error:
+        code = error.args[1] if len(error.args) > 1 and isinstance(error.args[1], int) else None
+        cloudlog.warning(f"Retrying micd input stream startup after PortAudio error {code}")
+        time.sleep(3)
+
+    try:
       cloudlog.info(f"micd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}")
       while True:
         self.update()
+    finally:
+      stream.stop()
+      stream.close()
 
 
 def main():
