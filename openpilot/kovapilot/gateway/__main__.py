@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import sys
+from functools import partial
 from pathlib import Path
 
 from openpilot.common.basedir import BASEDIR
@@ -33,7 +34,7 @@ def main() -> None:
   from openpilot.kovapilot.gateway.app import create_app
   from openpilot.kovapilot.gateway.camera import CameraSignaling
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
-  from openpilot.kovapilot.gateway.lan import load_lan_config, serve_lan
+  from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
   from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
   settings_params = Params()
@@ -53,7 +54,19 @@ def main() -> None:
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
   else:
-    asyncio.run(serve_lan(app, args.port, lan[1], lambda: cloudlog.warning("KovaLink Gateway Wi-Fi bind failed")))
+    advertise = None
+    if not PC:
+      try:
+        from openpilot.kovapilot.gateway.discovery import advertise_gateway
+      except ImportError:
+        cloudlog.warning("KovaLink Gateway DNS-SD unavailable")
+      else:
+        advertise = partial(
+          advertise_gateway, WIFI_INTERFACE, args.port, lambda: cloudlog.warning("KovaLink Gateway DNS-SD unavailable")
+        )
+    asyncio.run(serve_lan(
+      app, args.port, lan[1], lambda: cloudlog.warning("KovaLink Gateway Wi-Fi bind failed"), advertise=advertise,
+    ))
 
 
 if __name__ == "__main__":

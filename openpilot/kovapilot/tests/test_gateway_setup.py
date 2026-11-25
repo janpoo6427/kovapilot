@@ -6,6 +6,15 @@ from openpilot.kovapilot.gateway.lan import load_lan_config
 from tools.kovapilot import kovalink_gateway_setup as setup
 
 
+def test_setup_reuses_owned_directory_and_rejects_a_group_writable_one(tmp_path):
+  parent = tmp_path / "kova"
+  parent.mkdir(mode=0o700)
+  setup.prepare_directory(parent)
+  parent.chmod(0o770)
+  with pytest.raises(ValueError, match="private to writes"):
+    setup.prepare_directory(parent)
+
+
 def test_setup_creates_credentials_accepted_by_gateway_and_reuses_identity(tmp_path, monkeypatch):
   gateway = tmp_path / "gateway"
   gateway.mkdir()

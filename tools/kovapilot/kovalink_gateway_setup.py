@@ -6,6 +6,7 @@ import getpass
 import hashlib
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,17 @@ from openpilot.kovapilot.gateway import DEVICE_PACKAGES
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def prepare_directory(directory: Path) -> None:
+  if not directory.exists():
+    subprocess.run(
+      ["sudo", "install", "-d", "-m", "0700", "-o", str(os.geteuid()), "-g", str(os.getegid()), str(directory)],
+      check=True,
+    )
+  info = directory.lstat()
+  if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+    raise ValueError("Gateway setup directories must be owned by the regular device user and private to writes")
 
 
 def check_runtime(directory: Path) -> None:
@@ -99,6 +111,8 @@ def main() -> None:
     raise SystemExit("Switch the vehicle off before setting up KovaLink.")
 
   config = Path(Paths.persist_root()) / "kova" / "gateway"
+  prepare_directory(config.parent)
+  prepare_directory(DEVICE_PACKAGES.parent)
   with (DEVICE_PACKAGES.parent / ".setup.lock").open("a") as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     install_runtime(DEVICE_PACKAGES)
@@ -118,5 +132,7 @@ def main() -> None:
 if __name__ == "__main__":
   try:
     main()
-  except (OSError, ValueError, subprocess.CalledProcessError, getpass.GetPassWarning):
-    raise SystemExit("KovaLink setup failed. Check the operator guide and retry from an interactive terminal.") from None
+  except ValueError as error:
+    raise SystemExit(f"KovaLink setup failed: {error}") from None
+  except (OSError, subprocess.CalledProcessError, getpass.GetPassWarning) as error:
+    raise SystemExit(f"KovaLink setup failed ({type(error).__name__}). Retry from an interactive terminal.") from None

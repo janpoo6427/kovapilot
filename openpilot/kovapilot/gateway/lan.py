@@ -94,7 +94,13 @@ def wifi_socket(address: ipaddress.IPv4Interface, port: int) -> socket.socket:
     raise
 
 
-async def serve_lan(app, port, context, on_bind_error):
+async def stop_advertisement(task):
+  if task is not None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def serve_lan(app, port, context, on_bind_error, *, advertise=None):
   access = app[LAN_ACCESS_KEY]
   sockets = app[LAN_SOCKETS_KEY]
   runner = web.AppRunner(app, access_log=None, shutdown_timeout=3)
@@ -104,6 +110,7 @@ async def serve_lan(app, port, context, on_bind_error):
     loop.add_signal_handler(sig, stop.set)
 
   site = None
+  advertisement = None
   last_error_address = None
   try:
     await runner.setup()
@@ -112,6 +119,8 @@ async def serve_lan(app, port, context, on_bind_error):
       address = wifi_address()
       if address != access.address:
         access.address = None
+        await stop_advertisement(advertisement)
+        advertisement = None
         if site is not None:
           await site.stop()
           site = None
@@ -129,6 +138,8 @@ async def serve_lan(app, port, context, on_bind_error):
             site = candidate
             access.address = address
             last_error_address = None
+            if advertise is not None:
+              advertisement = asyncio.create_task(advertise())
           except (OSError, AttributeError):
             if address != last_error_address:
               on_bind_error()
@@ -139,6 +150,7 @@ async def serve_lan(app, port, context, on_bind_error):
         pass
   finally:
     access.address = None
+    await stop_advertisement(advertisement)
     await runner.cleanup()
     for sig in (signal.SIGINT, signal.SIGTERM):
       loop.remove_signal_handler(sig)

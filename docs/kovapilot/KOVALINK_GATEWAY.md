@@ -11,9 +11,12 @@ On a comma running this branch, switch the vehicle off and open an interactive
 terminal as the regular device user. From `/data/openpilot`, run the setup:
 
 ```sh
-sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /persist/kova /data/kova/gateway
-PYTHONPATH="$PWD" python3 tools/kovapilot/kovalink_gateway_setup.py
+cd /data/openpilot
+bash tools/kovapilot/kovalink_gateway_setup.sh
 ```
+
+The launcher uses the AGNOS Python environment used by manager. It creates
+the setup directories when needed, before installing packages or prompting.
 
 For the initial setup, generate a random token in your password manager with
 64 lowercase hexadecimal characters (32 random bytes). Paste it into the
@@ -23,11 +26,12 @@ the TLS configuration before enabling the existing manager flag. If the
 Gateway was already enabled and failed to start before setup, the flag and
 packages take effect on the next normal boot.
 
-On the phone, use a KovaLink build with authenticated Wi-Fi support. Open
-**연결 → 콤마 등록**, enter the current device IP, and use the token and the
-public certificate pin from setup. The phone needs a network route to the
-device's private Wi-Fi address. Entering the IP directly also works when local
-discovery is unavailable.
+On the phone, use a KovaLink build with authenticated Wi-Fi support. From
+**장치 연결**, select the discovered device and use the token and public
+certificate pin from setup. After the TLS listener binds, the Gateway
+announces `_kovalink._tcp` through Avahi on the same device interface. If the
+network blocks discovery, use **IP로 연결** with the address on the comma
+screen. The phone needs a network route to that address.
 
 The tool generates these files under `/persist/kova/gateway` on first setup.
 Administrators can provision the same files manually. Missing or invalid
