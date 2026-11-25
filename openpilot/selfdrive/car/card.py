@@ -11,6 +11,7 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
+from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
 
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -150,6 +151,8 @@ class Car:
     self.params.put("CarParamsPersistent", cp_bytes)
 
     self.v_cruise_helper = VCruiseHelper(self.CP)
+    self.cruise_accelerator_sync = CruiseAcceleratorSyncBridge(self.v_cruise_helper)
+    self._read_cruise_sync_settings()
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
@@ -180,16 +183,34 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
-    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+    CC = self.sm['carControl']
+    is_metric = self.is_metric
+    self.v_cruise_helper.update_v_cruise(CS, CC.enabled, is_metric)
+    if CC.enabled and not self.CC_prev.enabled:
       # Use CarState w/ buttons from the step selfdrived enables on
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed)
+
+    self._update_cruise_accelerator_sync(CS, CC, can_rcv_valid, is_metric)
 
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, RD
+
+  def _update_cruise_accelerator_sync(self, CS, CC, can_rcv_valid: bool, is_metric: bool):
+    enabled, stock_shadow, disengage_on_accelerator = self.cruise_sync_settings
+    inputs_valid = ((enabled or stock_shadow) and can_rcv_valid and CS.canValid and not self.CP.passive and self.initialized_prev and
+                    self.sm.all_checks(['carControl', 'onroadEvents']) and
+                    not any(e.userDisable or e.softDisable or e.immediateDisable for e in self.sm['onroadEvents']))
+    stock_target_kph = self.cruise_accelerator_sync.update(
+      CS, CC, inputs_valid=inputs_valid, cruise_engaged=CC.enabled and self.CC_prev.enabled,
+      enabled=enabled, stock_shadow=stock_shadow, disengage_on_accelerator=disengage_on_accelerator, is_metric=is_metric,
+    )
+    if stock_target_kph is not None:
+      cloudlog.event('cruise_accelerator_sync_stock_shadow', target_kph=stock_target_kph,
+                     stock_set_kph=self.v_cruise_helper.v_cruise_kph,
+                     stock_cluster_set_kph=self.v_cruise_helper.v_cruise_cluster_kph)
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None):
     """carState and carParams publish loop"""
@@ -257,7 +278,13 @@ class Car:
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
+      self._read_cruise_sync_settings()
       time.sleep(0.1)
+
+  def _read_cruise_sync_settings(self):
+    self.cruise_sync_settings = (self.params.get_bool("CruiseAcceleratorSync"),
+                                 self.params.get_bool("CruiseAcceleratorSyncStockShadow"),
+                                 self.params.get_bool("DisengageOnAccelerator"))
 
   def card_thread(self):
     e = threading.Event()

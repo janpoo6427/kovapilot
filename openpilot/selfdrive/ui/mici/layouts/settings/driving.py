@@ -21,6 +21,10 @@ class DrivingLayoutMici(NavScroller):
                                                                "Use the steering wheel distance button on supported cars.")
     self._initial_cruise_speed = InitialCruiseSpeedButton()
     self._initial_cruise_speed.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
+    cruise_sync_toggle = BigParamControl("sync cruise speed on accelerator release", "CruiseAcceleratorSync",
+                                        description="Raise the cruise set speed when you accelerate above it and release the accelerator.\n" +
+                                                    "Requires Disengage on Accelerator Pedal to be off.")
+    cruise_sync_toggle.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled",
                                  description="Warn when you drift across a detected lane line.\n" +
                                              "Only above 31 mph (50 km/h), with no turn signal.")
@@ -32,6 +36,7 @@ class DrivingLayoutMici(NavScroller):
     self._scroller.add_widgets([
       self._personality_toggle,
       self._initial_cruise_speed,
+      cruise_sync_toggle,
       always_on_dm_toggle,
       ldw_toggle,
       enable_openpilot,
@@ -39,6 +44,7 @@ class DrivingLayoutMici(NavScroller):
 
     # Toggle lists
     self._refresh_toggles = (
+      ("CruiseAcceleratorSync", cruise_sync_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),
       ("OpenpilotEnabledToggle", enable_openpilot),

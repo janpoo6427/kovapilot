@@ -16,6 +16,8 @@ DESCRIPTIONS = {
     "Your attention is required at all times to use this feature."
   ),
   "DisengageOnAccelerator": tr_noop("When enabled, pressing the accelerator pedal will disengage openpilot."),
+  "CruiseAcceleratorSync": tr_noop("Raise the cruise set speed when you accelerate above it and release the accelerator. " +
+                                   "Requires Disengage on Accelerator Pedal to be off."),
   "LongitudinalPersonality": tr_noop(
     "Standard is recommended. In aggressive mode, openpilot will follow lead cars closer and be more aggressive with the gas and brake. " +
     "In relaxed mode openpilot will stay further away from lead cars. On supported cars, you can cycle through these personalities with " +
@@ -49,6 +51,12 @@ class TogglesLayout(Widget):
         lambda: tr("Disengage on Accelerator Pedal"),
         DESCRIPTIONS["DisengageOnAccelerator"],
         "disengage_on_accelerator.png",
+        False,
+      ),
+      "CruiseAcceleratorSync": (
+        lambda: tr("Cruise Speed Sync on Accelerator Release"),
+        DESCRIPTIONS["CruiseAcceleratorSync"],
+        "speed_limit.png",
         False,
       ),
       "IsLdwEnabled": (
@@ -117,6 +125,8 @@ class TogglesLayout(Widget):
       except UnknownKeyName:
         locked = False
       toggle.action_item.set_enabled(not locked)
+      if param == "CruiseAcceleratorSync":
+        toggle.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
 
       # Make description callable for live translation
       additional_desc = ""
