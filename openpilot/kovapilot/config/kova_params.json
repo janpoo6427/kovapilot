@@ -147,12 +147,12 @@
       "defaultValue": false,
       "title": {"ko": "커브 감속", "en": "Curve slowdown"},
       "description": {
-        "ko": "오픈파일럿이 속도를 제어할 때 커브 앞에서 감속하고, 커브를 벗어나면 크루즈 설정속도 쪽으로 돌아옵니다.",
-        "en": "When openpilot controls speed, it slows before a curve and returns toward your cruise set speed after it."
+        "ko": "오픈파일럿이 속도를 제어할 때 커브 앞에서 감속하고, 커브를 벗어나면 크루즈 설정속도 쪽으로 돌아옵니다. 설정은 P에 두고 완전히 정차하면 반영돼요.",
+        "en": "When openpilot controls speed, it slows before a curve and returns toward your cruise set speed after it. Changes apply while stopped in Park."
       },
       "access": "readWrite",
       "risk": "control",
-      "applyPolicy": "restart",
+      "applyPolicy": "parked",
       "savePolicy": "anytime",
       "availability": "pendingConsumer"
     },

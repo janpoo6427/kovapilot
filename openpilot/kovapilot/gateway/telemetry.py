@@ -5,6 +5,7 @@ import time
 
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
 from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
+from openpilot.kovapilot.config.parked_setting import fresh_message, parked_for_settings as parked_for_settings
 
 
 def _points(line):
@@ -17,20 +18,8 @@ def _points(line):
   return points
 
 
-def _fresh(sm, now_ns, service):
-  return sm.valid[service] and sm.alive[service] and 0 <= now_ns - sm.logMonoTime[service] <= 500_000_000
-
-
-def parked_for_settings(sm, now_ns) -> bool:
-  if not (_fresh(sm, now_ns, "carState") and _fresh(sm, now_ns, "selfdriveState")):
-    return False
-  car = sm["carState"]
-  return bool(car.canValid and car.standstill and str(car.gearShifter) == "park" and abs(car.vEgo) < 0.1
-              and not sm["selfdriveState"].enabled)
-
-
 def road_scene(sm, now_ns):
-  if not _fresh(sm, now_ns, "carState"):
+  if not fresh_message(sm, now_ns, "carState"):
     return None
   car = sm["carState"]
   if not math.isfinite(car.vEgo):
@@ -45,9 +34,9 @@ def road_scene(sm, now_ns):
     scene["steeringAngleDegrees"] = car.steeringAngleDeg
   if math.isfinite(car.vCruise) and 0 < car.vCruise < 250:
     scene["setSpeedMps"] = car.vCruise / 3.6
-  if _fresh(sm, now_ns, "selfdriveState"):
+  if fresh_message(sm, now_ns, "selfdriveState"):
     scene["engaged"] = sm["selfdriveState"].enabled
-  if _fresh(sm, now_ns, "modelV2"):
+  if fresh_message(sm, now_ns, "modelV2"):
     model = sm["modelV2"]
     scene["plannedPath"] = _points(model.position)
     for key, index in (("leftLane", 1), ("rightLane", 2)):

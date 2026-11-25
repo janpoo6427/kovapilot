@@ -85,7 +85,10 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
         setting["applyState"] = "awaitingStart"
       else:
         setting["appliedValue"] = applied
-        setting["applyState"] = "applied" if applied == setting["value"] else "pendingRestart"
+        if applied == setting["value"]:
+          setting["applyState"] = "applied"
+        else:
+          setting["applyState"] = "pendingParked" if setting["applyPolicy"] == "parked" else "pendingRestart"
   return document
 
 

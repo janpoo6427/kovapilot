@@ -173,7 +173,8 @@ def test_curve_slowdown_reports_planner_application_and_unsupported_vehicle():
       assert pending["applyState"] == "awaitingStart"
       applied = False
       saved = await setting(await client.post("/v1/kova-params/update", json=payload))
-      assert saved["applyState"] == "pendingRestart"
+      assert saved["applyPolicy"] == "parked"
+      assert saved["applyState"] == "pendingParked"
       assert saved["value"] is True and saved["appliedValue"] is False
       applied = True
       active = await setting(await client.get("/v1/kova-params"))
