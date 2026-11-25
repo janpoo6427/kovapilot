@@ -13,6 +13,7 @@ from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, TextAlignment, TextAlignmentVertical
 from openpilot.selfdrive.ui.ui_state import ui_state, ChestnutState
 from openpilot.common.version import RELEASE_BRANCHES
+from openpilot.kovapilot.branding import BRAND_NAME
 
 HEAD_BUTTON_FONT_SIZE = 40
 HOME_PADDING = 8
@@ -155,7 +156,7 @@ class MiciHomeLayout(Widget):
       self._mic_icon,
     ], spacing=18)
 
-    self._openpilot_label = UnifiedLabel("openpilot", font_size=96, font_weight=FontWeight.DISPLAY, max_width=480, wrap_text=False)
+    self._brand_label = UnifiedLabel(BRAND_NAME, font_size=92, font_weight=FontWeight.DISPLAY, max_width=480, wrap_text=False)
     self._version_label = UnifiedLabel("", font_size=36, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._large_version_label = UnifiedLabel("", font_size=64, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._date_label = UnifiedLabel("", font_size=36, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
@@ -224,15 +225,15 @@ class MiciHomeLayout(Widget):
     text_pos = rl.Vector2(self.rect.x - 2 + HOME_PADDING, self.rect.y - 16)
     title_progress = self._wake_progress(*WAKE_TITLE[:2])
     title_y = text_pos.y + WAKE_TITLE[2] * (1.0 - title_progress) ** 3
-    self._openpilot_label.set_position(text_pos.x, title_y)
-    self._openpilot_label.render()
-    self._fade_in(rl.Rectangle(self.rect.x, title_y, self.rect.width, self._openpilot_label.font_size + 16), title_progress)
+    self._brand_label.set_position(text_pos.x, title_y)
+    self._brand_label.render()
+    self._fade_in(rl.Rectangle(self.rect.x, title_y, self.rect.width, self._brand_label.font_size + 16), title_progress)
 
     if self._version_text is not None:
       # release branch
       release_branch = self._version_text[1] in RELEASE_BRANCHES
       version_progress = self._wake_progress(*WAKE_VERSION[:2])
-      version_y = text_pos.y + self._openpilot_label.font_size + 16 + WAKE_VERSION[2] * (1.0 - version_progress) ** 3
+      version_y = text_pos.y + self._brand_label.font_size + 16 + WAKE_VERSION[2] * (1.0 - version_progress) ** 3
       version_pos = rl.Rectangle(text_pos.x, version_y, 100, 44)
       self._version_label.set_text(self._version_text[0])
       self._version_label.set_position(version_pos.x, version_pos.y)
