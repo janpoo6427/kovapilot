@@ -1,14 +1,19 @@
 # KovaLink Gateway
 
-The manager starts the Gateway when `KovaLinkGatewayEnabled` is set. Its native
-loopback endpoint remains `http://127.0.0.1:8082`. Optional Wi-Fi access uses
+On comma, manager prepares the Gateway Python packages automatically while
+offroad. The preparation runs in its own process, retries a failed download
+while offroad, and reuses the installed packages on following boots. A
+previously configured Gateway starts automatically when its packages are
+ready and `KovaLinkGatewayEnabled` is set.
+
+The native loopback endpoint is `http://127.0.0.1:8082`. Wi-Fi access uses
 TLS on the current private IPv4 address of `wlan0`, for clients on that subnet.
 The listener follows Wi-Fi address changes and closes old WebSockets. When
 AGNOS restricts interface binding to privileged users, the regular Gateway
 process binds the exact Wi-Fi address and enforces the same peer and
 authentication checks on each request.
 
-## Wi-Fi connection
+## First Wi-Fi registration
 
 On a comma running this branch, switch the vehicle off and open an interactive
 terminal as the regular device user. From `/data/openpilot`, run the setup:
@@ -18,16 +23,16 @@ cd /data/openpilot
 bash tools/kovapilot/kovalink_gateway_setup.sh
 ```
 
-The launcher uses the AGNOS Python environment used by manager. It creates
-the setup directories when needed, before installing packages or prompting.
+The launcher uses the AGNOS Python environment used by manager. It can also
+prepare the packages if the offroad boot process has not finished. First
+registration requires the user's token and verifies TLS before enabling
+Gateway startup. Later boots reuse the same registration.
 
 For the initial setup, generate a random token in your password manager with
 64 lowercase hexadecimal characters (32 random bytes). Paste it into the
-hidden prompt. The tool uses the device's `uv` and the repository lockfile to
-install only Gateway packages into `/data/kova/gateway/python`. It validates
-the TLS configuration before enabling the existing manager flag. If the
-Gateway was already enabled and failed to start before setup, the flag and
-packages take effect on the next normal boot.
+hidden prompt. Both preparation paths use the device's `uv` and the
+repository lockfile to install only Gateway packages into
+`/data/kova/gateway/python`.
 
 On the phone, use a KovaLink build with authenticated Wi-Fi support. From
 **장치 연결**, select the discovered device and use the token and public

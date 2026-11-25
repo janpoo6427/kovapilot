@@ -7,6 +7,7 @@ from openpilot.common.params import Params
 from openpilot.common.hardware import PC, COMMA_HARDWARE
 from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled, route_upload_enabled
 from openpilot.kovapilot.config.driver_monitoring import monitoring_enabled
+from openpilot.kovapilot.gateway.runtime import runtime_ready
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
@@ -61,7 +62,10 @@ def cloud_upload(started: bool, params: Params, CP: car.CarParams) -> bool:
   return route_upload_enabled()
 
 def kovalink_gateway(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return params.get_bool("KovaLinkGatewayEnabled")
+  return params.get_bool("KovaLinkGatewayEnabled") and (PC or runtime_ready())
+
+def kovalink_gateway_prepare(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and not runtime_ready()
 
 def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started
@@ -128,6 +132,7 @@ procs = [
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "openpilot.system.loggerd.uploader", cloud_upload),
+  PythonProcess("kovalink_gateway_prepare", "openpilot.kovapilot.gateway.bootstrap", kovalink_gateway_prepare, enabled=COMMA_HARDWARE),
   PythonProcess("kovalink_gateway", "openpilot.kovapilot.gateway.__main__", kovalink_gateway),
 
   # debug procs

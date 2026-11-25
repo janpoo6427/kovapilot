@@ -6,7 +6,6 @@ import getpass
 import hashlib
 import os
 import re
-import stat
 import subprocess
 import sys
 import tempfile
@@ -17,58 +16,7 @@ from openpilot.common.hardware import PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
 from openpilot.kovapilot.gateway import DEVICE_PACKAGES
-
-
-ROOT = Path(__file__).resolve().parents[2]
-
-
-def prepare_directory(directory: Path) -> None:
-  if not directory.exists():
-    subprocess.run(
-      ["sudo", "install", "-d", "-m", "0700", "-o", str(os.geteuid()), "-g", str(os.getegid()), str(directory)],
-      check=True,
-    )
-  info = directory.lstat()
-  if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
-    raise ValueError("Gateway setup directories must be owned by the regular device user and private to writes")
-
-
-def check_runtime(directory: Path) -> None:
-  check = "\n".join((
-    "from pathlib import Path",
-    "import sys",
-    "sys.path.insert(0, sys.argv[1])",
-    "import aiohttp.web",
-    "if not Path(aiohttp.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()):",
-    "  raise SystemExit('Gateway package directory is incomplete')",
-  ))
-  subprocess.run(
-    [sys.executable, "-I", "-c", check, str(directory)],
-    check=True,
-  )
-
-
-def install_runtime(directory: Path) -> None:
-  if directory.is_dir():
-    check_runtime(directory)
-    return
-  with tempfile.TemporaryDirectory(dir=directory.parent) as temporary:
-    staging = Path(temporary)
-    requirements = staging / "requirements.txt"
-    with requirements.open("wb") as exported:
-      subprocess.run(
-        ["uv", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
-         "--format", "requirements-txt"],
-        cwd=ROOT, stdout=exported, check=True,
-      )
-    target = staging / "python"
-    subprocess.run(
-      ["uv", "pip", "install", "--python", sys.executable, "--target", str(target),
-       "--require-hashes", "--only-binary=:all:", "-r", str(requirements)],
-      cwd=ROOT, check=True,
-    )
-    check_runtime(target)
-    target.rename(directory)
+from openpilot.kovapilot.gateway.runtime import install_runtime, prepare_directory
 
 
 def provision_tls(directory: Path) -> None:
@@ -111,11 +59,10 @@ def main() -> None:
     raise SystemExit("Switch the vehicle off before setting up KovaLink.")
 
   config = Path(Paths.persist_root()) / "kova" / "gateway"
-  prepare_directory(config.parent)
-  prepare_directory(DEVICE_PACKAGES.parent)
+  prepare_directory(config.parent, allow_sudo=True)
+  install_runtime()
   with (DEVICE_PACKAGES.parent / ".setup.lock").open("a") as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
-    install_runtime(DEVICE_PACKAGES)
     sys.path.insert(0, str(DEVICE_PACKAGES))
     from openpilot.kovapilot.gateway.lan import load_lan_config
 
@@ -134,5 +81,5 @@ if __name__ == "__main__":
     main()
   except ValueError as error:
     raise SystemExit(f"KovaLink setup failed: {error}") from None
-  except (OSError, subprocess.CalledProcessError, getpass.GetPassWarning) as error:
+  except (OSError, subprocess.SubprocessError, getpass.GetPassWarning) as error:
     raise SystemExit(f"KovaLink setup failed ({type(error).__name__}). Retry from an interactive terminal.") from None

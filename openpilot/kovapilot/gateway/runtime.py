@@ -1,0 +1,69 @@
+"""Prepare the isolated Gateway Python packages."""
+
+import fcntl
+import os
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from openpilot.common.basedir import BASEDIR
+from openpilot.kovapilot.gateway import DEVICE_PACKAGES
+
+
+def runtime_ready(directory: Path = DEVICE_PACKAGES) -> bool:
+  return (directory / "aiohttp" / "__init__.py").is_file()
+
+
+def prepare_directory(directory: Path, *, allow_sudo: bool = False) -> None:
+  try:
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+  except PermissionError:
+    if not allow_sudo:
+      raise
+    subprocess.run(
+      ["sudo", "install", "-d", "-m", "0700", "-o", str(os.geteuid()), "-g", str(os.getegid()), str(directory)],
+      check=True,
+    )
+  info = directory.lstat()
+  if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+    raise ValueError("Gateway setup directories must be owned by the regular device user and private to writes")
+
+
+def check_runtime(directory: Path) -> None:
+  check = "\n".join((
+    "from pathlib import Path",
+    "import sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "import aiohttp.web",
+    "if not Path(aiohttp.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()):",
+    "  raise SystemExit('Gateway package directory is incomplete')",
+  ))
+  subprocess.run([sys.executable, "-I", "-c", check, str(directory)], check=True, timeout=15)
+
+
+def install_runtime(directory: Path = DEVICE_PACKAGES) -> None:
+  prepare_directory(directory.parent)
+  with (directory.parent / ".runtime.lock").open("a") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if runtime_ready(directory):
+      check_runtime(directory)
+      return
+    with tempfile.TemporaryDirectory(dir=directory.parent) as temporary:
+      staging = Path(temporary)
+      requirements = staging / "requirements.txt"
+      with requirements.open("wb") as exported:
+        subprocess.run(
+          ["uv", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
+           "--format", "requirements-txt"],
+          cwd=BASEDIR, stdout=exported, check=True, timeout=15,
+        )
+      target = staging / "python"
+      subprocess.run(
+        ["uv", "pip", "install", "--python", sys.executable, "--target", str(target),
+         "--require-hashes", "--only-binary=:all:", "-r", str(requirements)],
+        cwd=BASEDIR, check=True, timeout=120,
+      )
+      check_runtime(target)
+      target.rename(directory)
