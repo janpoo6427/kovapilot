@@ -128,7 +128,7 @@ procs = [
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "openpilot.system.loggerd.uploader", cloud_upload),
-  PythonProcess("kovalink_gateway", "openpilot.kovapilot.gateway", kovalink_gateway),
+  PythonProcess("kovalink_gateway", "openpilot.kovapilot.gateway.__main__", kovalink_gateway),
 
   # debug procs
   PythonProcess("webrtcd", "openpilot.system.webrtc.webrtcd", or_(livestream, notcar)),

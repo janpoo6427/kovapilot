@@ -78,7 +78,7 @@ def test_cruise_config_preserves_legacy_then_uses_shared_settings(tmp_path):
   instance._read_cruise_sync_settings()
   assert instance.cruise_sync_settings == (False, False, False)
 
-  params.put(KOVA_PARAMS_KEY, {"schemaVersion": 1, "revision": 3, "values": {"navigation.speed_camera_profile": 2}}, block=True)
+  params.put(KOVA_PARAMS_KEY, {"schemaVersion": 1, "revision": 3, "values": {"display.onroad_brightness_fixed": 75, "navigation.speed_camera_profile": 2}}, block=True)
   params.put_bool("CruiseAcceleratorSync", True, block=True)
   params.put_bool("CruiseAcceleratorSyncStockShadow", True, block=True)
   instance._read_cruise_sync_settings()
@@ -91,5 +91,6 @@ def test_cruise_config_preserves_legacy_then_uses_shared_settings(tmp_path):
   assert state["revision"] == 4
   assert state["values"][CRUISE_SYNC_KEY] is False
   assert state["values"][CRUISE_SYNC_SHADOW_KEY] is True
+  assert state["values"]["display.onroad_brightness_fixed"] == 75
   assert state["values"]["navigation.speed_camera_profile"] == 2
   assert params.get_bool("CruiseAcceleratorSync") is True

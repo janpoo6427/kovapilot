@@ -20,6 +20,15 @@
       "description": {"ko": "내비게이션 기반 주행 보조 설정입니다.", "en": "Navigation-based driving assistance settings."}
     },
     {
+      "id": "display",
+      "order": 200,
+      "title": {"ko": "화면", "en": "Display"},
+      "description": {
+        "ko": "comma 장치 화면 표시와 관련된 사용자 설정입니다. 차량 제어에는 영향을 주지 않습니다.",
+        "en": "User settings for the comma device screen. They do not affect vehicle control."
+      }
+    },
+    {
       "id": "cruise",
       "order": 300,
       "title": {"ko": "크루즈", "en": "Cruise"},
@@ -66,6 +75,48 @@
       "risk": "control",
       "applyPolicy": "offroad",
       "availability": "pendingConsumer"
+    },
+    {
+      "key": "display.onroad_brightness_mode",
+      "groupId": "display",
+      "order": 100,
+      "type": "enum",
+      "defaultValue": "auto",
+      "options": ["auto", "auto_dark", "fixed"],
+      "optionTitles": {
+        "auto": {"ko": "자동", "en": "Auto"},
+        "auto_dark": {"ko": "자동(어둡게)", "en": "Auto (dark)"},
+        "fixed": {"ko": "고정", "en": "Fixed"}
+      },
+      "title": {"ko": "주행 중 화면 밝기", "en": "Onroad screen brightness"},
+      "description": {
+        "ko": "자동은 openpilot 기본 동작과 같습니다. 자동(어둡게)는 주변이 어두울수록 기본보다 더 어둡게(최저 10%) 합니다. 고정은 아래 고정 밝기를 씁니다. 경고가 떠 있는 동안에는 자동 밝기보다 어두워지지 않습니다.",
+        "en": "Auto matches the openpilot default. Auto (dark) dims further in low light (down to 10%). Fixed uses the fixed brightness below. While an alert is shown the screen is never dimmer than Auto."
+      },
+      "access": "readWrite",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
+    },
+    {
+      "key": "display.onroad_brightness_fixed",
+      "groupId": "display",
+      "order": 110,
+      "type": "integer",
+      "defaultValue": 50,
+      "minimum": 10,
+      "maximum": 100,
+      "step": 5,
+      "unit": {"ko": "%", "en": "%"},
+      "title": {"ko": "고정 밝기", "en": "Fixed brightness"},
+      "description": {
+        "ko": "주행 중 화면 밝기가 고정일 때 쓰는 밝기입니다. 30% 아래는 백라이트 대신 화면을 어둡게 덮어 표현합니다.",
+        "en": "Brightness used when onroad screen brightness is Fixed. Values below 30% are produced by dimming the UI instead of the backlight."
+      },
+      "access": "readWrite",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
     },
     {
       "key": "cruise.accelerator_sync",
