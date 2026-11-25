@@ -19,7 +19,7 @@ class GitRepository:
       timeout=3, check=check, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     ).stdout
 
-  def status(self, *, require_dirty=False):
+  def status(self):
     status = {
       "branch": self.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip() or None,
       "head": self.run("rev-parse", "HEAD").strip(),
@@ -31,8 +31,6 @@ class GitRepository:
       changes = self.run("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none")
       status["dirty"] = bool(changes)
     except (OSError, subprocess.SubprocessError):
-      if require_dirty:
-        raise
       # Older clients treat dirty as a boolean. Keep a conservative value.
       status["dirty"] = True
       status["dirtyKnown"] = False
@@ -67,10 +65,12 @@ class GitRepository:
     else:
       raise ValueError("invalid switch/reset request")
 
-    current = self.status(require_dirty=True)
+    current = self.status()
     plan = {"operation": operation, "branch": branch, "commit": commit, "branchHead": branch_head,
             "beforeHead": current["head"], "beforeBranch": current["branch"], "dirty": current["dirty"],
             "requiresRestart": True, "mutationEnabled": False}
+    if not current.get("dirtyKnown", True):
+      plan["dirtyKnown"] = False
     changed = self.run("diff", "--name-only", "-z", "--no-ext-diff", current["head"], commit, "--")
     plan["changedFileCount"] = changed.count("\0")
     plan["planDigest"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()

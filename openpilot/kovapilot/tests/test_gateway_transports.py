@@ -51,8 +51,9 @@ def test_kovalink_transports(tmp_path):
   asyncio.run(run())
 
 
-def test_git_status_reports_version_when_worktree_scan_times_out(tmp_path):
+def test_git_status_and_preview_return_commits_when_worktree_scan_times_out(tmp_path):
   head = "1" * 40
+  target = "2" * 40
 
   class SlowStatusRepository(GitRepository):
     def run(self, *args, check=True):
@@ -63,7 +64,10 @@ def test_git_status_reports_version_when_worktree_scan_times_out(tmp_path):
       if args[0] == "rev-parse":
         return "origin/master-jh\n" if args[-1] == "@{upstream}" else head
       if args[0] == "for-each-ref":
-        return f"master-jh\t{head}\t\n"
+        return f"master-jh\t{head}\t\nother\t{target}\t\n"
+      if args[0] == "diff":
+        assert args[-3:] == (head, target, "--")
+        return "changed-file\0"
       raise AssertionError(args)
 
   async def run():
@@ -75,7 +79,13 @@ def test_git_status_reports_version_when_worktree_scan_times_out(tmp_path):
       assert status["branch"] == "master-jh" and status["head"] == head
       assert status["dirtyKnown"] is False
       assert status["dirty"] is True
-      assert (await client.post("/v1/git/switch", json={"branch": "master-jh"})).status == 503
+      response = await client.post("/v1/git/switch", json={"branch": "other"})
+      assert response.status == 200
+      plan = await response.json()
+      assert plan["beforeHead"] == head and plan["commit"] == target
+      assert plan["changedFileCount"] == 1
+      assert plan["dirtyKnown"] is False and plan["dirty"] is True
+      assert plan["mutationEnabled"] is False
       assert (await client.post("/v1/git/apply", json={})).status == 403
 
   asyncio.run(run())

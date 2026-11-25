@@ -134,9 +134,9 @@ steering angle, cruise set speed, engagement and model path or lane points.
 Stale source data is omitted. Camera signaling takes `sdp` and `cameras`.
 The proxy sends the daemon an allowlisted request with empty cereal bridges.
 
-If Git cannot inspect the working tree, the status endpoint still returns
-branch and commit metadata with `dirtyKnown: false`. A preview requires a
-successful working tree inspection.
+If Git cannot inspect the working tree, status and previews return
+`dirtyKnown: false`. Previews compare committed snapshots and can show the
+file count with local changes still unknown.
 
 Git plans accept an `operation` of `switch` or `reset`, and a `branch` from
 the observed origin refs. Reset previews also require a full `commit` SHA
