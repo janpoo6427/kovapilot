@@ -20,7 +20,9 @@ Runtime behavior is selected from typed capability, exact radar/camera/ADAS firm
 
 If exact evidence is absent or different, the interface selects `dashcamOnly + SafetyModel.noOutput`. Carrot and Sunny remain wire-behavior and test-structure references, not safety authorities. Carrot safety relaxations are not included.
 
-The reviewed lateral staging source gate is enabled only on this development branch. A non-release build and exact angle capability remain mandatory; source gate OFF, release builds, and every evidence mismatch remain `dashcamOnly + noOutput`. This gate is independent from the longitudinal setting and adds no LONG safety permission.
+The Hyundai feature branch and the `master-jh` device development branch pin the reviewed opendbc build with lateral staging enabled. The shared `master` pins the disabled build. A non-release build and exact angle capability remain mandatory. With staging off, on release builds, or on an evidence mismatch, the interface selects `dashcamOnly + noOutput`.
+
+On a supported profile, `card` sets `ControlsReady` after controls initialize through its normal path. The setting reflects initialization and never enables engagement by itself. The staged profile uses stock ACC and carries no LONG safety permission.
 
 ## Lateral staging
 
