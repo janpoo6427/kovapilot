@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
 from openpilot.kovapilot.config.kova_params import (
-  CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore, ParamsKovaParamsBackend,
+  CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore, KovaParamsValidationError, ParamsKovaParamsBackend,
 )
 from openpilot.kovapilot.longitudinal.cruise_accelerator_sync import MIN_PRESS_SAMPLES
 from openpilot.selfdrive.car import card
@@ -85,22 +86,35 @@ def test_cruise_config_preserves_legacy_then_uses_shared_settings(tmp_path):
   }, block=True)
   params.put_bool("CruiseAcceleratorSync", True, block=True)
   params.put_bool("CruiseAcceleratorSyncStockShadow", True, block=True)
+  gateway_store.initialize_storage()
   instance._read_cruise_sync_settings(starting=True)
   assert instance.cruise_sync_settings == (True, True, False)
 
-  gateway_store.update(CRUISE_SYNC_KEY, False, 3, is_offroad=False)
+  gateway_store.update(CRUISE_SYNC_KEY, 0, 3, is_offroad=False)
   instance._read_cruise_sync_settings()
   assert instance.cruise_sync_settings == (True, True, False)
   instance._read_cruise_sync_settings(starting=True)
   assert instance.cruise_sync_settings == (False, True, False)
   state = params.get(KOVA_PARAMS_KEY)
   assert state["revision"] == 4
-  assert state["values"][CRUISE_SYNC_KEY] is False
-  assert state["values"][CRUISE_SYNC_SHADOW_KEY] is True
+  assert all(type(value) is int for value in state["values"].values())
+  assert state["values"][CRUISE_SYNC_KEY] == 0
+  assert state["values"][CRUISE_SYNC_SHADOW_KEY] == 1
   assert state["values"]["display.onroad_brightness_fixed"] == 75
   assert state["values"]["navigation.speed_camera_profile"] == 2
   assert params.get_bool("CruiseAcceleratorSync") is True
 
-  gateway_store.update(CRUISE_SYNC_SHADOW_KEY, False, 4, is_offroad=False)
+  gateway_store.update(CRUISE_SYNC_SHADOW_KEY, 0, 4, is_offroad=False)
   instance._read_cruise_sync_settings()
   assert instance.cruise_sync_settings == (False, False, False)
+
+
+def test_storage_initialization_preserves_an_invalid_native_params_file(tmp_path):
+  params = Params(tmp_path.as_posix())
+  path = Path(params.get_param_path(KOVA_PARAMS_KEY))
+  path.write_text("null", encoding="utf-8")
+
+  with pytest.raises(KovaParamsValidationError, match="could not be decoded"):
+    KovaParamsStore(ParamsKovaParamsBackend(params)).initialize_storage()
+
+  assert path.read_text(encoding="utf-8") == "null"

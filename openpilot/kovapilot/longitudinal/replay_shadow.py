@@ -87,7 +87,7 @@ def main() -> None:
   observed_frames = 0
   events = LogReader(str(args.rlog.resolve()), only_union_types=True)
   for observation in observe_replay(events, camera_inputs=camera_inputs, camera_profile=values.get(CAMERA_PROFILE_KEY, 0),
-                                    geometry_only=args.geometry_only, curve_enabled=values.get(CURVE_SLOWDOWN_KEY, True)):
+                                    geometry_only=args.geometry_only, curve_enabled=values.get(CURVE_SLOWDOWN_KEY, 1) == 1):
     payload = observation if isinstance(observation, dict) else asdict(observation)
     print(json.dumps(payload, allow_nan=False))
     observed_frames += 1

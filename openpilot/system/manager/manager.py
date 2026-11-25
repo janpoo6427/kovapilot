@@ -19,6 +19,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.kovapilot.config.kova_params import KovaParamsError, KovaParamsStore, ParamsKovaParamsBackend
 from openpilot.kovapilot.config.longitudinal_personality import migrate_longitudinal_personality
 
 
@@ -50,6 +51,11 @@ def manager_init() -> None:
   # Older forks may persist personality values outside the upstream enum.
   # Normalize before UI/selfdrived start so a stale value cannot crash either.
   migrate_longitudinal_personality(params)
+
+  try:
+    KovaParamsStore(ParamsKovaParamsBackend(params)).initialize_storage()
+  except (KovaParamsError, OSError):
+    cloudlog.exception("Could not initialize KovaParams storage")
 
   # Create folders needed for msgq
   try:

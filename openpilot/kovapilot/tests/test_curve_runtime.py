@@ -27,7 +27,7 @@ def run_plannerd(monkeypatch, *, enabled, native_long=True, interrupt=None, fram
   cp = car.CarParams.new_message(openpilotLongitudinalControl=native_long, longitudinalActuatorDelay=0.5)
   params = {
     "CarParams": cp.to_bytes(),
-    "KovaParams": {"schemaVersion": 1, "revision": 0, "values": {CURVE_SLOWDOWN_KEY: enabled}},
+    "KovaParams": {"schemaVersion": 1, "revision": 0, "values": {CURVE_SLOWDOWN_KEY: int(enabled)}},
   }
   params_backend = SimpleNamespace(get=lambda key, **kwargs: params.get(key),
                                    put=lambda key, value, **kwargs: params.__setitem__(key, value))
@@ -126,7 +126,7 @@ def test_saved_change_waits_for_park_without_restarting_plannerd(monkeypatch, in
 
   def save_onroad(inputs, params):
     if inputs.frame == 3:
-      KovaParamsStore(ParamsKovaParamsBackend(params)).update(CURVE_SLOWDOWN_KEY, not initial, 0, is_offroad=False)
+      KovaParamsStore(ParamsKovaParamsBackend(params)).update(CURVE_SLOWDOWN_KEY, int(not initial), 0, is_offroad=False)
     parked_later(inputs, params)
 
   baseline, _ = run_plannerd(monkeypatch, enabled=initial, frame_count=12, during=parked_later)
@@ -146,7 +146,7 @@ def test_parked_preference_requires_fresh_disengaged_control():
   inputs.valid = dict.fromkeys(CURVE_INPUTS, True)
   inputs.alive = dict.fromkeys(CURVE_INPUTS, True)
   inputs.logMonoTime = dict.fromkeys(CURVE_INPUTS, now)
-  params = {"KovaParams": {"schemaVersion": 1, "revision": 0, "values": {CURVE_SLOWDOWN_KEY: True}}}
+  params = {"KovaParams": {"schemaVersion": 1, "revision": 0, "values": {CURVE_SLOWDOWN_KEY: 1}}}
   preference = curve_slowdown_settings.CurveSlowdownPreference(params)
 
   inputs.logMonoTime["carControl"] = 0
@@ -190,13 +190,14 @@ def test_curve_application_snapshot_rejects_an_old_planner(tmp_path, monkeypatch
   monkeypatch.setattr(curve_slowdown_settings, "_applied_path", lambda: tmp_path / "curve.json")
   monkeypatch.setattr(curve_slowdown_settings.os, "getpid", lambda: 1234)
   curve_slowdown_settings.publish_applied_curve_slowdown(True, supported=True)
-  assert curve_slowdown_settings.applied_curve_slowdown(1234) is True
+  value = curve_slowdown_settings.applied_curve_slowdown(1234)
+  assert type(value) is int and value == 1
   assert curve_slowdown_settings.applied_curve_slowdown(1235) is None
   curve_slowdown_settings.publish_applied_curve_slowdown(False, supported=False)
   assert curve_slowdown_settings.applied_curve_slowdown(1234) == "unsupported"
 
 
-@pytest.mark.parametrize("value,expected", [(False, False), (True, True), (1, False), ("true", False), (None, False)])
+@pytest.mark.parametrize("value,expected", [(False, False), (True, False), (0, False), (1, True), (2, False), ("true", False), (None, False)])
 def test_curve_preference_fails_closed(value, expected):
   params = {"KovaParams": {"schemaVersion": 1, "revision": 0, "values": {CURVE_SLOWDOWN_KEY: value}}}
   assert curve_slowdown_settings.read_curve_slowdown(params) is expected

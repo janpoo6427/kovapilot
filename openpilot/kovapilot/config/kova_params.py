@@ -11,6 +11,11 @@ from typing import Any, Protocol
 
 
 KOVA_PARAMS_KEY = "KovaParams"
+BRIGHTNESS_MODE_KEY = "display.onroad_brightness_mode"
+BRIGHTNESS_MODE_AUTO, BRIGHTNESS_MODE_AUTO_DARK, BRIGHTNESS_MODE_FIXED = range(3)
+_LEGACY_BRIGHTNESS_MODES = {
+  "auto": BRIGHTNESS_MODE_AUTO, "auto_dark": BRIGHTNESS_MODE_AUTO_DARK, "fixed": BRIGHTNESS_MODE_FIXED,
+}
 CURVE_SLOWDOWN_KEY = "cruise.curve_slowdown"
 CRUISE_SYNC_KEY = "cruise.accelerator_sync"
 CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
@@ -63,11 +68,17 @@ class ParamsKovaParamsBackend:
     legacy_key = LEGACY_PARAM_KEYS.get(key)
     return self._params.get(legacy_key) if legacy_key is not None else None
 
+  def has_saved_settings(self) -> bool:
+    return Path(self._params.get_param_path(KOVA_PARAMS_KEY)).exists()
+
 
 def load_bundled_catalog() -> dict[str, Any]:
   with CATALOG_PATH.open(encoding="utf-8") as catalog_file:
     catalog = json.load(catalog_file)
   validate_catalog(catalog)
+  for setting in catalog["settings"]:
+    if setting["type"] not in ("integer", "number", "enum") or any(type(option) is not int for option in setting.get("options", [])):
+      raise KovaParamsValidationError(f"bundled setting {setting['key']} must have numeric values")
   return catalog
 
 
@@ -108,6 +119,10 @@ def _validate_value(setting: dict[str, Any], value: Any) -> None:
 def _validate_constraints(setting: dict[str, Any], locales: set[str]) -> None:
   key = setting["key"]
   setting_type = setting.get("type")
+  if "control" in setting and (setting["control"] != "switch" or setting_type != "enum" or
+                                not all(_enum_contains(setting.get("options"), option) for option in (0, 1)) or
+                                len(setting["options"]) != 2):
+    raise KovaParamsValidationError(f"switch control for {key} requires integer options 0 and 1")
   if setting_type in ("integer", "number"):
     bound_type_ok = (lambda bound: type(bound) is int) if setting_type == "integer" else _is_number
     for field in ("minimum", "maximum"):
@@ -189,36 +204,59 @@ class KovaParamsStore:
     self._settings = {setting["key"]: setting for setting in self._catalog["settings"]}
     self._lock = RLock()
 
-  def _default_value(self, key: str) -> Any:
-    if isinstance(self._backend, ParamsKovaParamsBackend):
-      legacy = self._backend.legacy_bool(key)
-      if type(legacy) is bool:
-        return legacy
-    return self._settings[key]["defaultValue"]
-
   def _default_state(self) -> dict[str, Any]:
     return {
       "schemaVersion": self._catalog["schemaVersion"],
       "revision": 0,
-      "values": {key: self._default_value(key) for key in self._settings},
+      "values": {key: setting["defaultValue"] for key, setting in self._settings.items()},
     }
 
-  def _load_state(self) -> dict[str, Any]:
+  def _read_state(self) -> dict[str, Any] | None:
     state = self._backend.get(KOVA_PARAMS_KEY)
     if state is None:
-      return self._default_state()
+      return None
     if not isinstance(state, dict) or state.get("schemaVersion") != self._catalog["schemaVersion"]:
       raise KovaParamsValidationError("stored KovaParams has an unsupported schemaVersion")
     revision = state.get("revision")
     values = state.get("values")
     if type(revision) is not int or revision < 0 or not isinstance(values, dict) or not set(values).issubset(self._settings):
       raise KovaParamsValidationError("stored KovaParams has an invalid revision or value set")
-    for key, value in values.items():
+    return deepcopy(state)
+
+  def initialize_storage(self) -> None:
+    """Persist numeric settings before the manager starts their consumers."""
+    with self._lock:
+      state = self._read_state()
+      changed = state is None
+      if state is None:
+        if isinstance(self._backend, ParamsKovaParamsBackend) and self._backend.has_saved_settings():
+          raise KovaParamsValidationError("stored KovaParams could not be decoded")
+        state = {"schemaVersion": self._catalog["schemaVersion"], "revision": 0, "values": {}}
+      values = state["values"]
+      for key, setting in self._settings.items():
+        value = values.get(key, setting["defaultValue"])
+        if key not in values and isinstance(self._backend, ParamsKovaParamsBackend):
+          legacy = self._backend.legacy_bool(key)
+          if legacy is not None:
+            value = legacy
+        if setting.get("control") == "switch" and type(value) is bool:
+          value = int(value)
+        elif key == BRIGHTNESS_MODE_KEY and type(value) is str:
+          value = _LEGACY_BRIGHTNESS_MODES.get(value, value)
+        _validate_value(setting, value)
+        if key not in values or type(values[key]) is not type(value):
+          values[key] = value
+          changed = True
+      if changed:
+        self._backend.put(KOVA_PARAMS_KEY, state, block=True)
+
+  def _load_state(self) -> dict[str, Any]:
+    state = self._read_state()
+    if state is None:
+      return self._default_state()
+    for key, value in state["values"].items():
       _validate_value(self._settings[key], value)
-    migrated_state = deepcopy(state)
-    for key in self._settings.keys() - values.keys():
-      migrated_state["values"][key] = self._default_value(key)
-    return migrated_state
+    return {**state, "values": self._default_state()["values"] | state["values"]}
 
   def values(self) -> dict[str, Any]:
     with self._lock:

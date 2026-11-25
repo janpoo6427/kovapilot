@@ -30,8 +30,8 @@ LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior"))
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
-APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], bool | None])
-APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], bool | str | None])
+APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], int | None])
+APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], int | str | None])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
@@ -280,8 +280,8 @@ async def git_apply(request):
 
 
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
-               applied_cruise_provider: Callable[[], bool | None] | None = None,
-               applied_curve_provider: Callable[[], bool | str | None] | None = None,
+               applied_cruise_provider: Callable[[], int | None] | None = None,
+               applied_curve_provider: Callable[[], int | str | None] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store

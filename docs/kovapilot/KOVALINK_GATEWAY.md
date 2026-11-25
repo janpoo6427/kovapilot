@@ -38,7 +38,7 @@ response reports the running process's acknowledged value separately, with
 `applyState` set to `applied`, `pendingRestart`, or `awaitingStart`.
 Saving never restarts the process.
 
-`cruise.curve_slowdown` is a default-off boolean for vehicles with openpilot
+`cruise.curve_slowdown` defaults to `0` (off) and uses `1` for on. It applies to vehicles with openpilot
 longitudinal control. Authorized saves remain in `pendingParked` until the
 running planner confirms the vehicle is stationary in Park with controls
 disengaged. The planner then applies the value without a restart.

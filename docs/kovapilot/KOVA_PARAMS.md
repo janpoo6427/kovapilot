@@ -12,9 +12,9 @@ The catalog is `openpilot/kovapilot/config/kova_params.json` and follows `kova_p
 - `risk`, `applyPolicy`, and `availability` support safety-aware gateway behavior.
 - Unknown catalog fields are allowed so later metadata can be added compatibly.
 - `integer` and `number` settings may declare inclusive `minimum`/`maximum`, a positive `step`, and a localized `unit`. The store rejects defaults and updates outside the range.
-- `enum` settings must declare non-empty unique `options` (strings or integers) and may declare localized `optionTitles` for every option. Values match options with the exact JSON type, so `true` never selects option `1`.
+- Bundled settings use numeric values. `enum` settings declare unique integer `options` and may declare localized `optionTitles`. Options `[0, 1]` with `"control": "switch"` render as a switch in KovaLink. Values match the exact JSON type.
 
-The first sample is `steering.always_on` (`항시 조향`). It defaults to `false`, can only be changed offroad, and reports `pendingConsumer`. Its desired value can be stored and returned through the gateway, but it does not enable steering behavior until a separately reviewed vehicle-capability consumer exists.
+The first sample is `steering.always_on` (`항시 조향`). It defaults to `0`, can only be changed offroad, and reports `pendingConsumer`. A vehicle-capability consumer must exist before the setting can affect steering.
 
 ## Persistent state
 
@@ -25,14 +25,14 @@ The `KovaParams` Params key is JSON:
   "schemaVersion": 1,
   "revision": 1,
   "values": {
-    "steering.always_on": true
+    "steering.always_on": 1
   }
 }
 ```
 
 Writes require the caller's `expectedRevision`, reject stale updates, validate the exact declared type, enforce the apply policy, and use a blocking Params write. Invalid stored state fails closed and is not silently replaced.
 
-When a catalog revision adds a setting, an older state that lacks that key receives the new setting's default without an eager storage write. Unknown stored keys still fail closed so removed or misspelled control settings cannot be ignored silently. The gateway process must own one shared `KovaParamsStore` instance as the single writer; its lock and revision check serialize writes within that process.
+Before starting the managed processes, the manager initializes missing settings and persists older switch and brightness selections as numbers. It preserves the revision and skips the write when the settings already use the current format. Once the manager has started, the gateway owns user updates through one shared `KovaParamsStore`. Its lock and revision check serialize writes within that process.
 
 The gateway read response should use `KovaParamsStore.document()`, which returns the full catalog plus `revision`, each current `value`, and `applyStatus`. The gateway adds a read-only `device` object (`{"offroad": bool}`, read from the device's own `IsOffroad`) to read and successful update responses so KovaLink can lock offroad-only settings before sending; the update handler still enforces the policy itself. The gateway write handler should call `update()` with the device's authoritative offroad state; it must not trust an offroad flag supplied by KovaLink.
 
@@ -44,7 +44,7 @@ The `aiohttp` Gateway in `openpilot/kovapilot/gateway` exposes `GET /v1/health`,
 
 ## Display: onroad screen brightness
 
-`display.onroad_brightness_mode` (`auto` / `auto_dark` / `fixed`, default `auto`) and `display.onroad_brightness_fixed` (integer 10-100 %, step 5, default 50) are the first available consumers. Both are `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.
+`display.onroad_brightness_mode` uses `0` for auto, `1` for auto (dark), and `2` for fixed. It defaults to `0`. `display.onroad_brightness_fixed` uses integers from 10 to 100 percent, with a step of 5 and a default of 50. Both settings have `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.
 
 - The consumer is `openpilot/kovapilot/display/brightness.py`. The UI reads `KovaParams` in its 5 Hz params thread with a tolerant reader: an unreadable or invalid value falls back to `auto` instead of failing, because this is display-only.
 - The upstream auto-brightness pipeline is unchanged (camera exposure, CIE curve, 10 s filter, backlight floor of 30 %, UI dim overlay below the floor). `onroad_brightness()` only maps the filtered upstream value to the selected target, right before the floor/dim step in `Device._update_brightness`.

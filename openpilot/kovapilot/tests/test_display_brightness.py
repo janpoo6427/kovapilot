@@ -114,21 +114,21 @@ def test_auto_dark_without_light_estimate_keeps_upstream_value():
 
 
 def test_unknown_mode_falls_back_to_upstream():
-  assert _run(42.0, DisplayBrightnessSettings(mode="night")) == 42.0
+  assert _run(42.0, DisplayBrightnessSettings(mode=9)) == 42.0
 
 
 @pytest.mark.parametrize("values, expected", [
   (None, DEFAULT_SETTINGS),
   ([], DEFAULT_SETTINGS),
   ({}, DEFAULT_SETTINGS),
-  ({MODE_KEY: "fixed", FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_FIXED, 35)),
-  ({MODE_KEY: "auto_dark"}, DisplayBrightnessSettings(MODE_AUTO_DARK, DEFAULT_FIXED)),
-  ({MODE_KEY: "AUTO", FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_AUTO, 35)),
-  ({MODE_KEY: 1, FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_AUTO, 35)),
-  ({MODE_KEY: "fixed", FIXED_KEY: True}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
-  ({MODE_KEY: "fixed", FIXED_KEY: 35.0}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
-  ({MODE_KEY: "fixed", FIXED_KEY: 5}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
-  ({MODE_KEY: "fixed", FIXED_KEY: 101}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
+  ({MODE_KEY: MODE_FIXED, FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_FIXED, 35)),
+  ({MODE_KEY: MODE_AUTO_DARK}, DisplayBrightnessSettings(MODE_AUTO_DARK, DEFAULT_FIXED)),
+  ({MODE_KEY: "fixed", FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_AUTO, 35)),
+  ({MODE_KEY: True, FIXED_KEY: 35}, DisplayBrightnessSettings(MODE_AUTO, 35)),
+  ({MODE_KEY: MODE_FIXED, FIXED_KEY: True}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
+  ({MODE_KEY: MODE_FIXED, FIXED_KEY: 35.0}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
+  ({MODE_KEY: MODE_FIXED, FIXED_KEY: 5}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
+  ({MODE_KEY: MODE_FIXED, FIXED_KEY: 101}, DisplayBrightnessSettings(MODE_FIXED, DEFAULT_FIXED)),
 ])
 def test_settings_reader_is_tolerant(values, expected):
   assert settings_from_values(values) == expected
@@ -138,7 +138,7 @@ def test_load_display_brightness_never_raises():
   assert load_display_brightness(FakeParams(exc=RuntimeError("boom"))) == DEFAULT_SETTINGS
   assert load_display_brightness(FakeParams(None)) == DEFAULT_SETTINGS
   assert load_display_brightness(FakeParams("not json")) == DEFAULT_SETTINGS
-  state = {"schemaVersion": 1, "revision": 3, "values": {MODE_KEY: "fixed", FIXED_KEY: 20}}
+  state = {"schemaVersion": 1, "revision": 3, "values": {MODE_KEY: MODE_FIXED, FIXED_KEY: 20}}
   assert load_display_brightness(FakeParams(state)) == DisplayBrightnessSettings(MODE_FIXED, 20)
 
 
@@ -166,10 +166,10 @@ def test_display_settings_can_change_onroad_and_round_trip_to_ui_reader():
   store.update(FIXED_KEY, 25, 1, is_offroad=False)
 
   assert load_display_brightness(FakeParams(backend.value)) == DisplayBrightnessSettings(MODE_FIXED, 25)
-  assert backend.value["values"]["steering.always_on"] is False
+  assert backend.value["values"]["steering.always_on"] == 0
 
 
-@pytest.mark.parametrize("key, value", [(MODE_KEY, "night"), (MODE_KEY, 0), (FIXED_KEY, 5), (FIXED_KEY, 105), (FIXED_KEY, "50")])
+@pytest.mark.parametrize("key, value", [(MODE_KEY, "night"), (MODE_KEY, 3), (MODE_KEY, True), (FIXED_KEY, 5), (FIXED_KEY, 105), (FIXED_KEY, "50")])
 def test_store_rejects_invalid_display_values(key, value):
   with pytest.raises(KovaParamsValidationError):
     KovaParamsStore(MemoryBackend()).update(key, value, 0, is_offroad=False)

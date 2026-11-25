@@ -6,14 +6,15 @@ the filtered upstream value to the user-selected onroad target.
 """
 from dataclasses import dataclass
 
-from openpilot.kovapilot.config.kova_params import KOVA_PARAMS_KEY
+from openpilot.kovapilot.config.kova_params import (BRIGHTNESS_MODE_KEY, BRIGHTNESS_MODE_AUTO, BRIGHTNESS_MODE_AUTO_DARK,
+                                                 BRIGHTNESS_MODE_FIXED, KOVA_PARAMS_KEY)
 
-MODE_KEY = "display.onroad_brightness_mode"
+MODE_KEY = BRIGHTNESS_MODE_KEY
 FIXED_KEY = "display.onroad_brightness_fixed"
 
-MODE_AUTO = "auto"
-MODE_AUTO_DARK = "auto_dark"
-MODE_FIXED = "fixed"
+MODE_AUTO = BRIGHTNESS_MODE_AUTO
+MODE_AUTO_DARK = BRIGHTNESS_MODE_AUTO_DARK
+MODE_FIXED = BRIGHTNESS_MODE_FIXED
 MODES = (MODE_AUTO, MODE_AUTO_DARK, MODE_FIXED)
 
 FIXED_MIN = 10
@@ -27,7 +28,7 @@ AUTO_DARK_MIN = 10.0
 
 @dataclass(frozen=True)
 class DisplayBrightnessSettings:
-  mode: str = MODE_AUTO
+  mode: int = MODE_AUTO
   fixed: int = DEFAULT_FIXED
 
 
@@ -40,7 +41,7 @@ def settings_from_values(values) -> DisplayBrightnessSettings:
     return DEFAULT_SETTINGS
 
   mode = values.get(MODE_KEY, MODE_AUTO)
-  if type(mode) is not str or mode not in MODES:
+  if type(mode) is not int or mode not in MODES:
     mode = MODE_AUTO
 
   fixed = values.get(FIXED_KEY, DEFAULT_FIXED)

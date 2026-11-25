@@ -31,10 +31,11 @@ def estimate(curvatures, *, prediction_speed=20.0, accel=0.0, ego=22.0):
 
 def test_curve_preference_from_saved_settings_controls_replay(tmp_path):
   config = tmp_path / "settings.json"
-  for saved in ({}, {CURVE_SLOWDOWN_KEY: False}, {CURVE_SLOWDOWN_KEY: True}):
+  for saved in ({}, {CURVE_SLOWDOWN_KEY: 0}, {CURVE_SLOWDOWN_KEY: 1}):
     config.write_text(json.dumps({"schemaVersion": 1, "revision": 1, "values": saved}))
-    enabled = read_replay_values(config)[CURVE_SLOWDOWN_KEY]
-    assert enabled == saved.get(CURVE_SLOWDOWN_KEY, False)
+    value = read_replay_values(config)[CURVE_SLOWDOWN_KEY]
+    assert type(value) is int and value == saved.get(CURVE_SLOWDOWN_KEY, 0)
+    enabled = value == 1
     shadow = LongitudinalShadow(145, 255, 1 / 3.6, curve_enabled=enabled)
     shadow.update(event("carParams", openpilotLongitudinalControl=True, dashcamOnly=False))
     shadow.update(event("carState", vCruise=100.0, vEgo=22.0, aEgo=0.0, standstill=False, canValid=True,

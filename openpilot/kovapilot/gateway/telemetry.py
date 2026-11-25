@@ -59,10 +59,10 @@ class CerealTelemetry:
     self.sm.update(0)
     return parked_for_settings(self.sm, time.monotonic_ns())
 
-  def applied_cruise_sync(self) -> bool | None:
+  def applied_cruise_sync(self) -> int | None:
     return applied_cruise_sync(self._running_pid("card"))
 
-  def applied_curve_slowdown(self) -> bool | str | None:
+  def applied_curve_slowdown(self) -> int | str | None:
     return applied_curve_slowdown(self._running_pid("plannerd"))
 
   def _running_pid(self, name: str) -> int | None:

@@ -11,7 +11,7 @@ CURVE_SETTING_POLL_NS = 500_000_000
 
 def read_curve_slowdown(params) -> bool:
   try:
-    return KovaParamsStore(ParamsKovaParamsBackend(params)).values()[CURVE_SLOWDOWN_KEY] is True
+    return KovaParamsStore(ParamsKovaParamsBackend(params)).values()[CURVE_SLOWDOWN_KEY] == 1
   except (KovaParamsError, RuntimeError, OSError):
     return False
 
@@ -44,9 +44,9 @@ def _applied_path() -> Path:
 
 
 def publish_applied_curve_slowdown(enabled: bool, *, supported: bool) -> None:
-  publish_applied_setting(_applied_path(), enabled if supported else "unsupported")
+  publish_applied_setting(_applied_path(), int(enabled) if supported else "unsupported")
 
 
-def applied_curve_slowdown(pid: int | None) -> bool | str | None:
+def applied_curve_slowdown(pid: int | None) -> int | str | None:
   value = read_applied_setting(_applied_path(), pid)
-  return value if type(value) is bool or value == "unsupported" else None
+  return value if value in (0, 1, "unsupported") else None
