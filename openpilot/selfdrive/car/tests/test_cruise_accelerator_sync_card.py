@@ -5,7 +5,11 @@ import pytest
 from opendbc.car.structs import car
 from openpilot.cereal import log
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
+from openpilot.kovapilot.config.kova_params import (
+  CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore, ParamsKovaParamsBackend,
+)
 from openpilot.kovapilot.longitudinal.cruise_accelerator_sync import MIN_PRESS_SAMPLES
 from openpilot.selfdrive.car import card
 from openpilot.selfdrive.car.cruise import VCruiseHelper
@@ -62,3 +66,30 @@ def test_card_publishes_synced_setpoints_only_on_valid_release(monkeypatch, bloc
   instance.sm.checks_ok = True
   instance.sm['onroadEvents'] = []
   assert step(95.0, False, long_active=True).vCruise == expected
+
+
+def test_cruise_config_preserves_legacy_then_uses_shared_settings(tmp_path):
+  params = Params(tmp_path.as_posix())
+  instance = object.__new__(card.Car)
+  instance.params = params
+  instance.kova_params = KovaParamsStore(ParamsKovaParamsBackend(params))
+  gateway_store = KovaParamsStore(ParamsKovaParamsBackend(Params(tmp_path.as_posix())))
+
+  instance._read_cruise_sync_settings()
+  assert instance.cruise_sync_settings == (False, False, False)
+
+  params.put(KOVA_PARAMS_KEY, {"schemaVersion": 1, "revision": 3, "values": {"navigation.speed_camera_profile": 2}}, block=True)
+  params.put_bool("CruiseAcceleratorSync", True, block=True)
+  params.put_bool("CruiseAcceleratorSyncStockShadow", True, block=True)
+  instance._read_cruise_sync_settings()
+  assert instance.cruise_sync_settings == (True, True, False)
+
+  gateway_store.update(CRUISE_SYNC_KEY, False, 3, is_offroad=True)
+  instance._read_cruise_sync_settings()
+  assert instance.cruise_sync_settings == (False, True, False)
+  state = params.get(KOVA_PARAMS_KEY)
+  assert state["revision"] == 4
+  assert state["values"][CRUISE_SYNC_KEY] is False
+  assert state["values"][CRUISE_SYNC_SHADOW_KEY] is True
+  assert state["values"]["navigation.speed_camera_profile"] == 2
+  assert params.get_bool("CruiseAcceleratorSync") is True

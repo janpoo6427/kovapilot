@@ -12,6 +12,8 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
+from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
+from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
 
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -152,6 +154,7 @@ class Car:
 
     self.v_cruise_helper = VCruiseHelper(self.CP)
     self.cruise_accelerator_sync = CruiseAcceleratorSyncBridge(self.v_cruise_helper)
+    self.kova_params = KovaParamsStore(ParamsKovaParamsBackend(self.params))
     self._read_cruise_sync_settings()
 
     self.is_metric = self.params.get_bool("IsMetric")
@@ -282,9 +285,8 @@ class Car:
       time.sleep(0.1)
 
   def _read_cruise_sync_settings(self):
-    self.cruise_sync_settings = (self.params.get_bool("CruiseAcceleratorSync"),
-                                 self.params.get_bool("CruiseAcceleratorSyncStockShadow"),
-                                 self.params.get_bool("DisengageOnAccelerator"))
+    enabled, stock_shadow = read_cruise_sync_settings(self.kova_params)
+    self.cruise_sync_settings = enabled, stock_shadow, self.params.get_bool("DisengageOnAccelerator")
 
   def card_thread(self):
     e = threading.Event()

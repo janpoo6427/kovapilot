@@ -26,6 +26,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarParamsPrevRoute", {PERSISTENT, BYTES}},
     {"CompletedTrainingVersion", {PERSISTENT, STRING, "0"}},
     {"ControlsReady", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    // Legacy cruise values are read when the corresponding KovaParams setting is absent.
     {"CruiseAcceleratorSync", {PERSISTENT, BOOL, "0"}},
     {"CruiseAcceleratorSyncStockShadow", {PERSISTENT, BOOL, "0"}},
     {"CurrentBootlog", {PERSISTENT, STRING}},

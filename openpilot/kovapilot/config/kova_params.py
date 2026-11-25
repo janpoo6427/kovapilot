@@ -11,6 +11,12 @@ from typing import Any, Protocol
 
 
 KOVA_PARAMS_KEY = "KovaParams"
+CRUISE_SYNC_KEY = "cruise.accelerator_sync"
+CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
+LEGACY_PARAM_KEYS = {
+  CRUISE_SYNC_KEY: "CruiseAcceleratorSync",
+  CRUISE_SYNC_SHADOW_KEY: "CruiseAcceleratorSyncStockShadow",
+}
 CATALOG_PATH = Path(__file__).with_name("kova_params.json")
 
 
@@ -51,6 +57,10 @@ class ParamsKovaParamsBackend:
 
   def put(self, key: str, value: Any, block: bool = False) -> None:
     self._params.put(key, value, block=block)
+
+  def legacy_bool(self, key: str) -> bool | None:
+    legacy_key = LEGACY_PARAM_KEYS.get(key)
+    return self._params.get(legacy_key) if legacy_key is not None else None
 
 
 def load_bundled_catalog() -> dict[str, Any]:
@@ -176,11 +186,18 @@ class KovaParamsStore:
     self._settings = {setting["key"]: setting for setting in self._catalog["settings"]}
     self._lock = RLock()
 
+  def _default_value(self, key: str) -> Any:
+    if isinstance(self._backend, ParamsKovaParamsBackend):
+      legacy = self._backend.legacy_bool(key)
+      if type(legacy) is bool:
+        return legacy
+    return self._settings[key]["defaultValue"]
+
   def _default_state(self) -> dict[str, Any]:
     return {
       "schemaVersion": self._catalog["schemaVersion"],
       "revision": 0,
-      "values": {key: setting["defaultValue"] for key, setting in self._settings.items()},
+      "values": {key: self._default_value(key) for key in self._settings},
     }
 
   def _load_state(self) -> dict[str, Any]:
@@ -196,9 +213,13 @@ class KovaParamsStore:
     for key, value in values.items():
       _validate_value(self._settings[key], value)
     migrated_state = deepcopy(state)
-    for key, setting in self._settings.items():
-      migrated_state["values"].setdefault(key, setting["defaultValue"])
+    for key in self._settings.keys() - values.keys():
+      migrated_state["values"][key] = self._default_value(key)
     return migrated_state
+
+  def values(self) -> dict[str, Any]:
+    with self._lock:
+      return self._load_state()["values"]
 
   def document(self) -> dict[str, Any]:
     with self._lock:
