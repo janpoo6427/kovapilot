@@ -57,7 +57,11 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
   assert document["revision"] == 1
   assert document["settings"][0]["value"] is True
   assert document["settings"][0]["applyStatus"] == "pendingConsumer"
-  assert backend.value == {"schemaVersion": 1, "revision": 1, "values": {"steering.always_on": True}}
+  assert backend.value == {
+    "schemaVersion": 1,
+    "revision": 1,
+    "values": {"steering.always_on": True, "navigation.speed_camera_profile": 0},
+  }
   assert backend.put_calls[0][2] is True
 
 
