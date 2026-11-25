@@ -8,6 +8,7 @@ from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
+from openpilot.kovapilot.display.brightness import DEFAULT_SETTINGS as DEFAULT_DISPLAY_BRIGHTNESS, load_display_brightness, onroad_brightness
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
@@ -117,6 +118,7 @@ class UIState:
     self.is_body: bool | None = False
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
+    self.display_brightness = DEFAULT_DISPLAY_BRIGHTNESS
 
     self._params_thread: threading.Thread | None = None
 
@@ -264,6 +266,7 @@ class UIState:
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.personality_param = get_longitudinal_personality(self.params)
+    self.display_brightness = load_display_brightness(self.params)
     self.navigation_enabled = self.params.get_bool("NavigationEnabled")
     self.nav_destination_set = self.params.get("NavDestination") is not None
     self.chestnut_active = self.params.get("ChestnutActive")
@@ -369,6 +372,9 @@ class Device:
       clipped_brightness = float(np.interp(clipped_brightness, [0, 1], [BRIGHTNESS_MIN, 100]))
 
     brightness = self._brightness_filter.update(clipped_brightness)
+    brightness = onroad_brightness(brightness, ui_state.display_brightness, onroad=ui_state.started, auto_valid=ui_state.light_sensor >= 0,
+                                   alert_active=ui_state.sm["selfdriveState"].alertSize != log.SelfdriveState.AlertSize.none,
+                                   auto_min=BRIGHTNESS_MIN)
     gui_app.set_dim(1 - brightness / BACKLIGHT_MIN)
     brightness = round(max(brightness, BACKLIGHT_MIN))
     if not self._awake:

@@ -41,3 +41,14 @@ The first transport integration is the loopback-only `aiohttp` application in `o
 ## Development transport test
 
 `tools/kovapilot/kovalink_gateway_dev.py` runs the same loopback-only application with an optional fixture catalog (`openpilot/kovapilot/tests/fixtures/kova_params_e2e.json`). It refuses to start without an isolated `PARAMS_ROOT` and always binds `127.0.0.1`. KovaLink's end-to-end transport test drives it and the real `python -m openpilot.kovapilot.gateway` entry point.
+
+## Display: onroad screen brightness
+
+`display.onroad_brightness_mode` (`auto` / `auto_dark` / `fixed`, default `auto`) and `display.onroad_brightness_fixed` (integer 10-100 %, step 5, default 50) are the first available consumers. Both are `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.
+
+- The consumer is `openpilot/kovapilot/display/brightness.py`. The UI reads `KovaParams` in its 5 Hz params thread with a tolerant reader: an unreadable or invalid value falls back to `auto` instead of failing, because this is display-only.
+- The upstream auto-brightness pipeline is unchanged (camera exposure, CIE curve, 10 s filter, backlight floor of 30 %, UI dim overlay below the floor). `onroad_brightness()` only maps the filtered upstream value to the selected target, right before the floor/dim step in `Device._update_brightness`.
+- `auto`: identical to upstream for every input.
+- `auto_dark`: rescales the upstream range `[BRIGHTNESS_MIN, 100]` to `[10, 100]`, so low light gets darker and daylight stays at 100 %. Without a live road-camera light estimate it keeps the upstream value.
+- `fixed`: uses the fixed value. Values below 30 % are produced by the dim overlay, not the backlight.
+- While an onroad alert is shown (`selfdriveState.alertSize != none`) the result is never dimmer than upstream auto. Offroad brightness, the sleep timeout and display power are unchanged. Onroad screen-off is intentionally not offered.
