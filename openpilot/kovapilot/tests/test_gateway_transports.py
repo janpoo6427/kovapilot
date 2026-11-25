@@ -7,7 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from openpilot.kovapilot.config.kova_params import KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
-from openpilot.kovapilot.gateway.telemetry import road_scene
+from openpilot.kovapilot.gateway.telemetry import parked_for_settings, road_scene
 
 
 def test_kovalink_transports(tmp_path):
@@ -49,6 +49,55 @@ def test_kovalink_transports(tmp_path):
     assert git("status", "--porcelain") == ""
 
   asyncio.run(run())
+
+
+def test_git_status_reports_version_when_worktree_scan_times_out(tmp_path):
+  head = "1" * 40
+
+  class SlowStatusRepository(GitRepository):
+    def run(self, *args, check=True):
+      if args[0] == "status":
+        raise subprocess.TimeoutExpired(args, 3)
+      if args[0] == "symbolic-ref":
+        return "master-jh\n"
+      if args[0] == "rev-parse":
+        return "origin/master-jh\n" if args[-1] == "@{upstream}" else head
+      if args[0] == "for-each-ref":
+        return f"master-jh\t{head}\t\n"
+      raise AssertionError(args)
+
+  async def run():
+    app = create_app(KovaParamsStore(None), lambda: True, git=SlowStatusRepository(tmp_path))
+    async with TestClient(TestServer(app)) as client:
+      response = await client.get("/v1/git/status")
+      assert response.status == 200
+      status = await response.json()
+      assert status["branch"] == "master-jh" and status["head"] == head
+      assert status["dirtyKnown"] is False
+      assert status["dirty"] is True
+      assert (await client.post("/v1/git/switch", json={"branch": "master-jh"})).status == 503
+      assert (await client.post("/v1/git/apply", json={})).status == 403
+
+  asyncio.run(run())
+
+
+def test_parked_configuration_requires_fresh_can_park_and_no_engagement():
+  class Sample(dict):
+    valid = {"carState": True, "selfdriveState": True}
+    alive = valid.copy()
+    logMonoTime = {"carState": 1_000_000_000, "selfdriveState": 1_000_000_000}
+
+  car = SimpleNamespace(vEgo=0., canValid=True, standstill=True, gearShifter="park")
+  selfdrive = SimpleNamespace(enabled=False)
+  sm = Sample(carState=car, selfdriveState=selfdrive)
+  assert parked_for_settings(sm, 1_010_000_000)
+  car.gearShifter = "drive"
+  assert not parked_for_settings(sm, 1_010_000_000)
+  car.gearShifter = "park"
+  selfdrive.enabled = True
+  assert not parked_for_settings(sm, 1_010_000_000)
+  selfdrive.enabled = False
+  assert not parked_for_settings(sm, 1_600_000_000)
 
 
 def test_scene_omits_stale_sources_and_converts_cruise_speed():

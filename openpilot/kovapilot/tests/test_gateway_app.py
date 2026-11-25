@@ -44,8 +44,9 @@ def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only
   monkeypatch.setattr(lan, "PRIVATE_NETWORKS", (access.address.network,))
 
   async def check():
+    parked = False
     store = KovaParamsStore(MemoryBackend())
-    app = create_app(store, lambda: True, lan_access=access)
+    app = create_app(store, lambda: False, parked_provider=lambda: parked, lan_access=access)
     runner = web.AppRunner(app)
     await runner.setup()
     try:
@@ -72,6 +73,19 @@ def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only
           assert settings[CRUISE_SYNC_KEY]["access"] == "readOnly"
           assert settings["display.onroad_brightness_fixed"]["value"] == 65
         assert store.values()[CRUISE_SYNC_KEY] is False
+        payload.update(key=CRUISE_SYNC_SHADOW_KEY, value=True, expectedRevision=1)
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 403
+        parked = True
+        async with client.get("/v1/kova-params") as response:
+          assert (await response.json())["device"] == {"offroad": False, "parked": True}
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 200
+          assert (await response.json())["device"]["parked"] is True
+        assert store.values()[CRUISE_SYNC_SHADOW_KEY] is True
+        payload.update(key=CRUISE_SYNC_KEY, value=True, expectedRevision=2)
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 403
         async with client.post("/v1/git/apply", json={}) as response:
           assert response.status == 403
 

@@ -168,7 +168,7 @@ def validate_catalog(catalog: Any) -> None:
       raise KovaParamsValidationError(f"unknown group for {setting['key']}")
     if setting.get("access") not in ("readOnly", "readWrite"):
       raise KovaParamsValidationError(f"invalid access for {setting['key']}")
-    if setting.get("applyPolicy") not in ("immediate", "offroad", "restart"):
+    if setting.get("applyPolicy") not in ("immediate", "offroad", "parked", "restart"):
       raise KovaParamsValidationError(f"invalid applyPolicy for {setting['key']}")
     if setting.get("availability") not in ("available", "pendingConsumer", "unsupported"):
       raise KovaParamsValidationError(f"invalid availability for {setting['key']}")
@@ -231,7 +231,7 @@ class KovaParamsStore:
         setting["applyStatus"] = setting["availability"]
       return document
 
-  def update(self, key: str, value: Any, expected_revision: int, *, is_offroad: bool,
+  def update(self, key: str, value: Any, expected_revision: int, *, is_offroad: bool, is_parked: bool = False,
              allowed_risks: frozenset[str] | None = None) -> dict[str, Any]:
     if type(expected_revision) is not int or expected_revision < 0:
       raise KovaParamsValidationError("expected_revision must be a non-negative integer")
@@ -242,6 +242,8 @@ class KovaParamsStore:
       raise KovaParamsReadOnlyError(f"setting is read-only: {key}")
     if setting["applyPolicy"] == "offroad" and not is_offroad:
       raise KovaParamsApplyPolicyError(f"setting can only be changed offroad: {key}")
+    if setting["applyPolicy"] == "parked" and not (is_offroad or is_parked):
+      raise KovaParamsApplyPolicyError(f"setting can only be changed when parked or offroad: {key}")
     _validate_value(setting, value)
 
     with self._lock:

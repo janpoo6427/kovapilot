@@ -27,6 +27,7 @@ MAX_REQUEST_BYTES = 64 * 1024
 LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior"))
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
+PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
@@ -49,12 +50,13 @@ def _allowed_write_risks(request: web.Request) -> frozenset[str] | None:
   return None
 
 
-def _with_device_state(request: web.Request, document: dict[str, Any], is_offroad: bool | None = None) -> dict[str, Any]:
-  # Read-only device state so KovaLink can lock offroad-only settings before sending.
-  # The update handler still enforces the policy from the device's own IsOffroad.
-  if is_offroad is None:
-    is_offroad = bool(request.app[OFFROAD_PROVIDER_KEY]())
-  document["device"] = {"offroad": is_offroad}
+def _device_state(request: web.Request) -> dict[str, bool]:
+  parked = request.app.get(PARKED_PROVIDER_KEY)
+  return {"offroad": bool(request.app[OFFROAD_PROVIDER_KEY]()), "parked": bool(parked and parked())}
+
+
+def _with_device_state(request: web.Request, document: dict[str, Any], device_state: dict[str, bool] | None = None) -> dict[str, Any]:
+  document["device"] = _device_state(request) if device_state is None else device_state
   allowed = _allowed_write_risks(request)
   if allowed is not None:
     for setting in document["settings"]:
@@ -106,14 +108,15 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(400, "invalid_json", "request body must be valid JSON")
 
   store = request.app[KOVA_PARAMS_STORE_KEY]
-  is_offroad = request.app[OFFROAD_PROVIDER_KEY]()
+  device_state = _device_state(request)
   try:
     document = await asyncio.to_thread(
       store.update,
       key,
       value,
       expected_revision,
-      is_offroad=is_offroad,
+      is_offroad=device_state["offroad"],
+      is_parked=device_state["parked"],
       allowed_risks=_allowed_write_risks(request),
     )
   except KovaParamsRevisionConflict as exc:
@@ -122,7 +125,7 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(403, "update_forbidden", str(exc))
   except KovaParamsValidationError as exc:
     return _error(400, "invalid_value", str(exc))
-  return web.json_response(_with_device_state(request, document, bool(is_offroad)))
+  return web.json_response(_with_device_state(request, document, device_state))
 
 
 @web.middleware
@@ -246,11 +249,13 @@ async def git_apply(request):
   return _error(403, "git_mutation_disabled", "authenticated updater integration is unavailable")
 
 
-def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, telemetry=None, camera=None, git=None,
-               lan_access=None) -> web.Application:
+def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
+               telemetry=None, camera=None, git=None, lan_access=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
+  if parked_provider is not None:
+    app[PARKED_PROVIDER_KEY] = parked_provider
   app[SOCKETS_KEY] = set()
   app[LAN_SOCKETS_KEY] = set()
   if lan_access is not None:

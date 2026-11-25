@@ -51,9 +51,10 @@ def main() -> None:
       lan = load_lan_config(prepare_tls_identity(), require_token=False)
   except (OSError, ValueError, SubprocessError):
     cloudlog.warning("KovaLink Gateway Wi-Fi disabled: invalid TLS or credential configuration")
+  telemetry = CerealTelemetry()
   app = create_app(
     store, lambda: device_state_params.get_bool("IsOffroad"),
-    telemetry=CerealTelemetry(), camera=CameraSignaling(device_state_params),
+    parked_provider=telemetry.is_parked, telemetry=telemetry, camera=CameraSignaling(device_state_params),
     git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState")),
     lan_access=lan[0] if lan else None,
   )

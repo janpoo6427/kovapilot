@@ -14,11 +14,20 @@ def _points(line):
   return points
 
 
-def road_scene(sm, now_ns):
-  def fresh(service, max_age_ns=500_000_000):
-    return sm.valid[service] and sm.alive[service] and 0 <= now_ns - sm.logMonoTime[service] <= max_age_ns
+def _fresh(sm, now_ns, service):
+  return sm.valid[service] and sm.alive[service] and 0 <= now_ns - sm.logMonoTime[service] <= 500_000_000
 
-  if not fresh("carState"):
+
+def parked_for_settings(sm, now_ns) -> bool:
+  if not (_fresh(sm, now_ns, "carState") and _fresh(sm, now_ns, "selfdriveState")):
+    return False
+  car = sm["carState"]
+  return bool(car.canValid and car.standstill and str(car.gearShifter) == "park" and abs(car.vEgo) < 0.1
+              and not sm["selfdriveState"].enabled)
+
+
+def road_scene(sm, now_ns):
+  if not _fresh(sm, now_ns, "carState"):
     return None
   car = sm["carState"]
   if not math.isfinite(car.vEgo):
@@ -33,9 +42,9 @@ def road_scene(sm, now_ns):
     scene["steeringAngleDegrees"] = car.steeringAngleDeg
   if math.isfinite(car.vCruise) and 0 < car.vCruise < 250:
     scene["setSpeedMps"] = car.vCruise / 3.6
-  if fresh("selfdriveState"):
+  if _fresh(sm, now_ns, "selfdriveState"):
     scene["engaged"] = sm["selfdriveState"].enabled
-  if fresh("modelV2"):
+  if _fresh(sm, now_ns, "modelV2"):
     model = sm["modelV2"]
     scene["plannedPath"] = _points(model.position)
     for key, index in (("leftLane", 1), ("rightLane", 2)):
@@ -53,3 +62,7 @@ class CerealTelemetry:
   def __call__(self):
     self.sm.update(0)
     return road_scene(self.sm, time.monotonic_ns())
+
+  def is_parked(self) -> bool:
+    self.sm.update(0)
+    return parked_for_settings(self.sm, time.monotonic_ns())

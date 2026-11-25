@@ -6,6 +6,10 @@ The installation uses the checked-in AGNOS wheels and validates them against
 `uv.lock` without network access. Later boots reuse the installed packages.
 The Gateway starts automatically when its packages are ready.
 
+For a first install, use the `master-jh` branch in the standard kovapilot
+installation flow. A fresh checkout of that branch carries the wheels and
+starts Gateway on the first normal AGNOS boot.
+
 The native loopback endpoint is `http://127.0.0.1:8082`. Wi-Fi access uses
 TLS on the current private IPv4 address of `wlan0`, for clients on that subnet.
 The listener follows Wi-Fi address changes and closes old WebSockets. When
@@ -26,6 +30,10 @@ telemetry, camera and settings APIs. Wi-Fi connections using only network
 access can write display, comfort and behavior settings subject to their
 existing apply policies. Control settings are read-only in this mode. Git
 apply stays disabled. Use a network whose members you trust.
+
+The stock ACC diagnostic setting can be changed in P while the vehicle is
+stationary and disengaged, or while the device is offroad. The settings
+document reports `device.parked` separately from `device.offroad`.
 
 ## Optional bearer authentication
 
@@ -122,6 +130,10 @@ Telemetry frames include `schemaVersion: 1`, `monotonicTimeNanos` and
 steering angle, cruise set speed, engagement and model path or lane points.
 Stale source data is omitted. Camera signaling takes `sdp` and `cameras`.
 The proxy sends the daemon an allowlisted request with empty cereal bridges.
+
+If Git cannot inspect the working tree, the status endpoint still returns
+branch and commit metadata with `dirtyKnown: false`. A preview requires a
+successful working tree inspection.
 
 Git plans accept an `operation` of `switch` or `reset`, and a `branch` from
 the observed origin refs. Reset previews also require a full `commit` SHA

@@ -146,9 +146,9 @@ def test_read_reports_device_offroad_state():
   async def test_case(client, state):
     response = await client.get("/v1/kova-params")
     assert response.status == 200
-    assert (await response.json())["device"] == {"offroad": True}
+    assert (await response.json())["device"] == {"offroad": True, "parked": False}
     state["offroad"] = False
-    assert (await (await client.get("/v1/kova-params")).json())["device"] == {"offroad": False}
+    assert (await (await client.get("/v1/kova-params")).json())["device"] == {"offroad": False, "parked": False}
 
   asyncio.run(_with_client(test_case, offroad=True))
 
@@ -163,7 +163,7 @@ def test_onroad_allows_immediate_but_rejects_offroad_setting():
     body = await response.json()
     assert response.status == 200
     assert body["revision"] == 1
-    assert body["device"] == {"offroad": False}
+    assert body["device"] == {"offroad": False, "parked": False}
     assert _setting(body, "e2e.level")["value"] == 4
 
   asyncio.run(_with_client(test_case, offroad=False))

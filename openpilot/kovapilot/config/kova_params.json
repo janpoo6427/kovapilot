@@ -147,7 +147,7 @@
       },
       "access": "readWrite",
       "risk": "behavior",
-      "applyPolicy": "offroad",
+      "applyPolicy": "parked",
       "availability": "available"
     }
   ]

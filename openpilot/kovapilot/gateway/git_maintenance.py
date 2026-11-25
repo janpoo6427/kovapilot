@@ -19,16 +19,24 @@ class GitRepository:
       timeout=3, check=check, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     ).stdout
 
-  def status(self):
-    changes = self.run("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none")
-    return {
+  def status(self, *, require_dirty=False):
+    status = {
       "branch": self.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip() or None,
       "head": self.run("rev-parse", "HEAD").strip(),
       "upstream": self.run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", check=False).strip() or None,
-      "dirty": bool(changes),
       "updaterState": self.updater_state(),
       "mutationEnabled": False,
     }
+    try:
+      changes = self.run("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none")
+      status["dirty"] = bool(changes)
+    except (OSError, subprocess.SubprocessError):
+      if require_dirty:
+        raise
+      # Older clients treat dirty as a boolean. Keep a conservative value.
+      status["dirty"] = True
+      status["dirtyKnown"] = False
+    return status
 
   def branches(self):
     refs = self.run("for-each-ref", "--count=256", "--format=%(refname:lstrip=3)%09%(objectname)%09%(symref)", "refs/remotes/origin/")
@@ -59,7 +67,7 @@ class GitRepository:
     else:
       raise ValueError("invalid switch/reset request")
 
-    current = self.status()
+    current = self.status(require_dirty=True)
     plan = {"operation": operation, "branch": branch, "commit": commit, "branchHead": branch_head,
             "beforeHead": current["head"], "beforeBranch": current["branch"], "dirty": current["dirty"],
             "requiresRestart": True, "mutationEnabled": False}
