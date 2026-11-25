@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from contextlib import suppress
+from subprocess import SubprocessError
 from typing import Any, Protocol
 
-from aiohttp import web
+from aiohttp import ClientError, web
 
 from openpilot.kovapilot.config.kova_params import (
   KovaParamsApplyPolicyError,
@@ -15,12 +17,19 @@ from openpilot.kovapilot.config.kova_params import (
   KovaParamsStore,
   KovaParamsValidationError,
 )
+from openpilot.kovapilot.gateway.camera import camera_offer
+from openpilot.kovapilot.gateway.git_maintenance import GitRepository
 
 
 API_SCHEMA_VERSION = 1
-MAX_REQUEST_BYTES = 16 * 1024
+MAX_REQUEST_BYTES = 64 * 1024
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
+TELEMETRY_KEY = web.AppKey("telemetry", Callable)
+SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
+CAMERA_KEY = web.AppKey("camera", Callable)
+GIT_KEY = web.AppKey("git", GitRepository)
+GIT_LOCK_KEY = web.AppKey("git_lock", asyncio.Lock)
 
 
 class OffroadProvider(Protocol):
@@ -101,11 +110,130 @@ async def update_kova_params(request: web.Request) -> web.Response:
   return web.json_response(_with_device_state(request, document, bool(is_offroad)))
 
 
-def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider) -> web.Application:
-  app = web.Application(client_max_size=MAX_REQUEST_BYTES)
+@web.middleware
+async def local_client(request, handler):
+  if request.remote not in ("127.0.0.1", "::1") or request.headers.get("Origin") is not None:
+    return _error(403, "local_client_required", "only native loopback clients are supported")
+  host = request.host
+  if host != "[::1]" and not host.startswith("[::1]:") and host.split(":", 1)[0].lower() not in ("localhost", "127.0.0.1"):
+    return _error(403, "local_client_required", "only loopback host names are supported")
+  return await handler(request)
+
+
+async def telemetry_stream(request):
+  source = request.app.get(TELEMETRY_KEY)
+  if source is None:
+    return _error(503, "telemetry_unavailable", "telemetry source is unavailable")
+  sockets = request.app[SOCKETS_KEY]
+  if len(sockets) >= 4:
+    return _error(503, "telemetry_busy", "too many telemetry clients")
+  ws = web.WebSocketResponse(heartbeat=15, max_msg_size=1024, compress=False)
+  sockets.add(ws)
+
+  async def publish():
+    try:
+      while not ws.closed:
+        frame = source()
+        if frame is not None:
+          await asyncio.wait_for(ws.send_json(frame), 2)
+        await asyncio.sleep(0.05)
+    except (TimeoutError, ConnectionError):
+      pass
+    finally:
+      await ws.close()
+
+  try:
+    await ws.prepare(request)
+    publisher = asyncio.create_task(publish())
+    try:
+      async for _ in ws:
+        await ws.close(code=1008, message=b"read only")
+    finally:
+      publisher.cancel()
+      with suppress(asyncio.CancelledError):
+        await publisher
+  finally:
+    sockets.discard(ws)
+  return ws
+
+
+async def close_sockets(app):
+  await asyncio.gather(*(ws.close(code=1001) for ws in tuple(app[SOCKETS_KEY]) if ws.prepared), return_exceptions=True)
+
+
+async def stream_offer(request):
+  signal = request.app.get(CAMERA_KEY)
+  if signal is None:
+    return _error(503, "camera_unavailable", "camera source is unavailable")
+  if request.content_type != "application/json":
+    return _error(415, "invalid_content_type", "expected application/json")
+  try:
+    offer = camera_offer(await request.json())
+  except (ValueError, TypeError):
+    return _error(400, "invalid_offer", "expected SDP and one supported road camera")
+  try:
+    return web.json_response(await signal(offer))
+  except (ClientError, TimeoutError, ValueError, asyncio.IncompleteReadError):
+    return _error(503, "camera_unavailable", "camera signaling did not complete")
+
+
+async def git_api(request):
+  repo = request.app.get(GIT_KEY)
+  if repo is None:
+    return _error(503, "git_unavailable", "device repository is unavailable")
+  action = request.match_info["action"]
+  try:
+    if action == "log":
+      limit, cursor = int(request.query.get("limit", 20)), int(request.query.get("cursor", 0))
+      if not 1 <= limit <= 100 or not 0 <= cursor <= 10_000:
+        raise ValueError
+      callback, args = repo.log, (limit, cursor)
+    elif action == "status":
+      callback, args = repo.status, ()
+    elif action == "branches":
+      callback, args = repo.branches, ()
+    else:
+      body = await request.json()
+      if not isinstance(body, dict) or set(body) - {"operation", "branch", "commit"}:
+        raise ValueError
+      callback, args = repo.plan, (body.get("operation", action), body.get("branch"), body.get("commit"))
+      if action in ("switch", "reset") and args[0] != action:
+        raise ValueError
+    lock = request.app[GIT_LOCK_KEY]
+    if lock.locked():
+      return _error(503, "git_busy", "repository inspection is in progress")
+    async with lock:
+      result = await asyncio.to_thread(callback, *args)
+    return web.json_response({"branches": result} if action == "branches" else result)
+  except (ValueError, TypeError):
+    return _error(400, "invalid_git_request", "invalid Git parameters or target")
+  except (OSError, SubprocessError):
+    return _error(503, "git_unavailable", "device repository could not be inspected")
+
+
+async def git_apply(request):
+  return _error(403, "git_mutation_disabled", "authenticated updater integration is unavailable")
+
+
+def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, telemetry=None, camera=None, git=None) -> web.Application:
+  app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
+  app[SOCKETS_KEY] = set()
+  app[GIT_LOCK_KEY] = asyncio.Lock()
+  if telemetry is not None:
+    app[TELEMETRY_KEY] = telemetry
+  if camera is not None:
+    app[CAMERA_KEY] = camera
+  if git is not None:
+    app[GIT_KEY] = git
+  app.on_shutdown.append(close_sockets)
   app.router.add_get("/v1/health", health)
   app.router.add_get("/v1/kova-params", get_kova_params)
   app.router.add_post("/v1/kova-params/update", update_kova_params)
+  app.router.add_get("/v1/telemetry", telemetry_stream)
+  app.router.add_post("/v1/stream", stream_offer)
+  app.router.add_get("/v1/git/{action:status|branches|log}", git_api)
+  app.router.add_post("/v1/git/{action:plan|switch|reset}", git_api)
+  app.router.add_post("/v1/git/apply", git_apply)
   return app
