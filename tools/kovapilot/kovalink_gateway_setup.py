@@ -16,7 +16,7 @@ from openpilot.common.hardware import PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
 from openpilot.kovapilot.gateway import DEVICE_PACKAGES
-from openpilot.kovapilot.gateway.runtime import install_runtime, prepare_directory
+from openpilot.kovapilot.gateway.runtime import create_tls_keypair, install_runtime, prepare_directory
 
 
 def provision_tls(directory: Path) -> None:
@@ -31,15 +31,8 @@ def provision_tls(directory: Path) -> None:
   with tempfile.TemporaryDirectory(dir=directory.parent) as temporary:
     staging = Path(temporary) / "gateway"
     staging.mkdir(mode=0o700)
-    key = staging / "server.key"
     digest = staging / "token.sha256"
-    subprocess.run(
-      ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-       "-nodes", "-days", "825", "-subj", "/CN=KovaLink Gateway",
-       "-keyout", str(key), "-out", str(staging / "server.pem")],
-      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
-    )
-    key.chmod(0o600)
+    create_tls_keypair(staging)
     digest.write_text(hashlib.sha256(token.encode("ascii")).hexdigest() + "\n", encoding="ascii")
     digest.chmod(0o600)
     staging.rename(directory)

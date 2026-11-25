@@ -36,7 +36,7 @@ When a catalog revision adds a setting, an older state that lacks that key recei
 
 The gateway read response should use `KovaParamsStore.document()`, which returns the full catalog plus `revision`, each current `value`, and `applyStatus`. The gateway adds a read-only `device` object (`{"offroad": bool}`, read from the device's own `IsOffroad`) to read and successful update responses so KovaLink can lock offroad-only settings before sending; the update handler still enforces the policy itself. The gateway write handler should call `update()` with the device's authoritative offroad state; it must not trust an offroad flag supplied by KovaLink.
 
-The first transport integration is the loopback-only `aiohttp` application in `openpilot/kovapilot/gateway`. It exposes `GET /v1/health`, `GET /v1/kova-params`, and `POST /v1/kova-params/update`. The manager process remains disabled unless persistent `KovaLinkGatewayEnabled` is explicitly set. LAN bind, authentication, telemetry, WebRTC proxy, and Git operations are later gated stages.
+The `aiohttp` Gateway in `openpilot/kovapilot/gateway` exposes `GET /v1/health`, `GET /v1/kova-params`, and `POST /v1/kova-params/update`. It starts automatically on comma. Local-network sessions can change display, comfort and behavior settings. The Gateway enforces catalog access and apply policies for every update. See [KovaLink Gateway](KOVALINK_GATEWAY.md) for the transport modes.
 
 ## Development transport test
 

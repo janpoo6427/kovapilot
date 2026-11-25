@@ -5,6 +5,7 @@ import asyncio
 import sys
 from functools import partial
 from pathlib import Path
+from subprocess import SubprocessError
 
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.hardware import PC
@@ -12,6 +13,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.kovapilot.gateway import DEVICE_PACKAGES
+from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
 
 
 LOOPBACK_HOST = "127.0.0.1"
@@ -41,9 +43,13 @@ def main() -> None:
   device_state_params = Params()
   store = KovaParamsStore(ParamsKovaParamsBackend(settings_params))
   lan = None
+  provisioned = Path(Paths.persist_root()) / "kova" / "gateway"
   try:
-    lan = load_lan_config(Path(Paths.persist_root()) / "kova" / "gateway")
-  except (OSError, ValueError):
+    if PC or provisioned.exists() or provisioned.is_symlink():
+      lan = load_lan_config(provisioned)
+    else:
+      lan = load_lan_config(prepare_tls_identity(), require_token=False)
+  except (OSError, ValueError, SubprocessError):
     cloudlog.warning("KovaLink Gateway Wi-Fi disabled: invalid TLS or credential configuration")
   app = create_app(
     store, lambda: device_state_params.get_bool("IsOffroad"),

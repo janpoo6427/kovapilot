@@ -28,8 +28,12 @@ IFF_UP_RUNNING = 0x1 | 0x40
 
 @dataclass
 class LanAccess:
-  token_digest: bytes
+  token_digest: bytes | None
   address: ipaddress.IPv4Interface | None = None
+
+  @property
+  def authentication(self) -> str:
+    return "localNetwork" if self.token_digest is None else "bearer"
 
   def accepts_peer(self, local: str, remote: str) -> bool:
     if self.address is None or local != str(self.address.ip):
@@ -41,6 +45,8 @@ class LanAccess:
     return peer in self.address.network and any(peer in network for network in PRIVATE_NETWORKS)
 
   def authenticates(self, authorization: str) -> bool:
+    if self.token_digest is None:
+      return False
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or re.fullmatch(r"[0-9a-f]{64}", token) is None:
       return False
@@ -51,20 +57,25 @@ LAN_ACCESS_KEY = web.AppKey("lan_access", LanAccess)
 LAN_SOCKETS_KEY = web.AppKey("lan_sockets", set)
 
 
-def load_lan_config(directory: Path) -> tuple[LanAccess, ssl.SSLContext] | None:
+def load_lan_config(directory: Path, *, require_token: bool = True) -> tuple[LanAccess, ssl.SSLContext] | None:
   if not directory.exists():
     return None
-  for private in (directory / "server.key", directory / "token.sha256"):
+  private_files = ["server.key", "token.sha256"] if require_token else ["server.key"]
+  for filename in private_files:
+    private = directory / filename
     metadata = private.lstat()
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
       raise ValueError("LAN credentials must be private files owned by the Gateway user")
-  digest = (directory / "token.sha256").read_text(encoding="ascii").strip()
-  if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-    raise ValueError("invalid LAN token digest")
+  token_digest = None
+  if require_token:
+    digest = (directory / "token.sha256").read_text(encoding="ascii").strip()
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+      raise ValueError("invalid LAN token digest")
+    token_digest = bytes.fromhex(digest)
   context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
   context.minimum_version = ssl.TLSVersion.TLSv1_2
   context.load_cert_chain(directory / "server.pem", directory / "server.key", password="")
-  return LanAccess(bytes.fromhex(digest)), context
+  return LanAccess(token_digest), context
 
 
 def wifi_address() -> ipaddress.IPv4Interface | None:

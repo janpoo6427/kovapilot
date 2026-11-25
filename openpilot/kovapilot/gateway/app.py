@@ -1,4 +1,4 @@
-"""KovaLink Gateway application for loopback and authenticated Wi-Fi."""
+"""KovaLink Gateway application for native loopback and local Wi-Fi."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 
 API_SCHEMA_VERSION = 1
 MAX_REQUEST_BYTES = 64 * 1024
+LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior"))
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
@@ -41,12 +42,24 @@ def _error(status: int, code: str, message: str) -> web.Response:
   return web.json_response({"error": {"code": code, "message": message}}, status=status)
 
 
+def _allowed_write_risks(request: web.Request) -> frozenset[str] | None:
+  access = request.app.get(LAN_ACCESS_KEY)
+  if request.secure and access is not None and access.token_digest is None:
+    return LOCAL_NETWORK_WRITE_RISKS
+  return None
+
+
 def _with_device_state(request: web.Request, document: dict[str, Any], is_offroad: bool | None = None) -> dict[str, Any]:
   # Read-only device state so KovaLink can lock offroad-only settings before sending.
   # The update handler still enforces the policy from the device's own IsOffroad.
   if is_offroad is None:
     is_offroad = bool(request.app[OFFROAD_PROVIDER_KEY]())
   document["device"] = {"offroad": is_offroad}
+  allowed = _allowed_write_risks(request)
+  if allowed is not None:
+    for setting in document["settings"]:
+      if setting.get("risk") not in allowed:
+        setting["access"] = "readOnly"
   return document
 
 
@@ -55,7 +68,7 @@ async def health(request: web.Request) -> web.Response:
     "status": "ok",
     "schemaVersion": API_SCHEMA_VERSION,
     "bindScope": "wifi" if request.secure else "loopback",
-    "authentication": "bearer" if request.secure else "localProcessOnly",
+    "authentication": request.app[LAN_ACCESS_KEY].authentication if request.secure else "localProcessOnly",
   })
 
 
@@ -101,6 +114,7 @@ async def update_kova_params(request: web.Request) -> web.Response:
       value,
       expected_revision,
       is_offroad=is_offroad,
+      allowed_risks=_allowed_write_risks(request),
     )
   except KovaParamsRevisionConflict as exc:
     return _error(409, "revision_conflict", str(exc))
@@ -120,7 +134,7 @@ async def local_client(request, handler):
         or request.host not in (local[0], f"{local[0]}:{local[1]}") or "Origin" in request.headers):
       return _error(403, "wifi_client_required", "use the device Wi-Fi IPv4 address")
     auth = request.headers.getall("Authorization", [])
-    if len(auth) != 1 or not access.authenticates(auth[0]):
+    if access.token_digest is not None and (len(auth) != 1 or not access.authenticates(auth[0])):
       response = _error(401, "authentication_required", "valid Gateway credentials are required")
       response.headers["WWW-Authenticate"] = "Bearer"
       return response

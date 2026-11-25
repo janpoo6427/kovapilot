@@ -62,7 +62,7 @@ def cloud_upload(started: bool, params: Params, CP: car.CarParams) -> bool:
   return route_upload_enabled()
 
 def kovalink_gateway(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return params.get_bool("KovaLinkGatewayEnabled") and (PC or runtime_ready())
+  return params.get_bool("KovaLinkGatewayEnabled") if PC else runtime_ready()
 
 def kovalink_gateway_prepare(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started and not runtime_ready()

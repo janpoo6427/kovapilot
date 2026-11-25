@@ -2,9 +2,8 @@
 
 On comma, manager prepares the Gateway Python packages automatically while
 offroad. The preparation runs in its own process, retries a failed download
-while offroad, and reuses the installed packages on following boots. A
-previously configured Gateway starts automatically when its packages are
-ready and `KovaLinkGatewayEnabled` is set.
+while offroad, and reuses the installed packages on following boots. The
+Gateway starts automatically on comma when its packages are ready.
 
 The native loopback endpoint is `http://127.0.0.1:8082`. Wi-Fi access uses
 TLS on the current private IPv4 address of `wlan0`, for clients on that subnet.
@@ -13,7 +12,21 @@ AGNOS restricts interface binding to privileged users, the regular Gateway
 process binds the exact Wi-Fi address and enforces the same peer and
 authentication checks on each request.
 
-## First Wi-Fi registration
+## Automatic Wi-Fi connection
+
+Boot comma and open KovaLink on the same private Wi-Fi network. The device
+creates its TLS identity automatically and announces `_kovalink._tcp` after
+the listener binds. Link checks the Gateway's local network access mode and
+pins the certificate for the connection. If discovery is unavailable, use
+**IP로 연결** from the phone.
+
+Devices on the same private subnet can use the Gateway's allowlisted
+telemetry, camera and settings APIs. Wi-Fi connections using only network
+access can write display, comfort and behavior settings subject to their
+existing apply policies. Control settings are read-only in this mode. Git
+apply stays disabled. Use a network whose members you trust.
+
+## Optional bearer authentication
 
 On a comma running this branch, switch the vehicle off and open an interactive
 terminal as the regular device user. From `/data/openpilot`, run the setup:
@@ -24,9 +37,9 @@ bash tools/kovapilot/kovalink_gateway_setup.sh
 ```
 
 The launcher uses the AGNOS Python environment used by manager. It can also
-prepare the packages if the offroad boot process has not finished. First
-registration requires the user's token and verifies TLS before enabling
-Gateway startup. Later boots reuse the same registration.
+prepare the packages if the offroad boot process has not finished. It uses
+the operator's token and verifies the bearer configuration. Later boots
+reuse the same registration.
 
 For the initial setup, generate a random token in your password manager with
 64 lowercase hexadecimal characters (32 random bytes). Paste it into the
@@ -41,9 +54,10 @@ announces `_kovalink._tcp` through Avahi on the same device interface. If the
 network blocks discovery, use **IP로 연결** with the address on the comma
 screen. The phone needs a network route to that address.
 
-The tool generates these files under `/persist/kova/gateway` on first setup.
-Administrators can provision the same files manually. Missing or invalid
-configuration leaves the running Gateway in loopback mode.
+The tool generates these files under `/persist/kova/gateway`. If the Gateway
+was already running, restart comma after adding this configuration. When
+that directory exists, the Gateway requires a valid bearer configuration to
+start its Wi-Fi listener.
 
 - `server.pem` contains the device TLS certificate and any certificate chain.
 - `server.key` contains the matching private key.
@@ -58,7 +72,8 @@ or removing this configuration to revoke an old token.
 Enter the comma's current Wi-Fi IPv4 address as the Gateway host. For example,
 with `192.168.43.20`, HTTP APIs use `https://192.168.43.20:8082` and telemetry
 uses `wss://192.168.43.20:8082/v1/telemetry`. HTTP and WebSocket handshakes
-require `Authorization: Bearer <token>`, including `GET /v1/health`.
+require `Authorization: Bearer <token>` in bearer mode, including
+`GET /v1/health`.
 Clients must authenticate the server before sending the token. Use the
 trusted certificate with an IP SAN matching the current address, or an
 explicitly provisioned device identity pin if the client supports it. After an

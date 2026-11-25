@@ -231,13 +231,14 @@ class KovaParamsStore:
         setting["applyStatus"] = setting["availability"]
       return document
 
-  def update(self, key: str, value: Any, expected_revision: int, *, is_offroad: bool) -> dict[str, Any]:
+  def update(self, key: str, value: Any, expected_revision: int, *, is_offroad: bool,
+             allowed_risks: frozenset[str] | None = None) -> dict[str, Any]:
     if type(expected_revision) is not int or expected_revision < 0:
       raise KovaParamsValidationError("expected_revision must be a non-negative integer")
     setting = self._settings.get(key)
     if setting is None:
       raise KovaParamsValidationError(f"unknown setting: {key}")
-    if setting["access"] != "readWrite":
+    if setting["access"] != "readWrite" or (allowed_risks is not None and setting.get("risk") not in allowed_risks):
       raise KovaParamsReadOnlyError(f"setting is read-only: {key}")
     if setting["applyPolicy"] == "offroad" and not is_offroad:
       raise KovaParamsApplyPolicyError(f"setting can only be changed offroad: {key}")

@@ -1,11 +1,15 @@
 import asyncio
+import ipaddress
 from copy import deepcopy
 
+from aiohttp import ClientSession, TCPConnector, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
+from openpilot.kovapilot.gateway import lan
+from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
 
 
 class MemoryBackend:
@@ -26,6 +30,58 @@ async def _with_client(test_case, *, is_offroad=True):
   app = create_app(KovaParamsStore(MemoryBackend()), lambda: is_offroad)
   async with TestClient(TestServer(app)) as client:
     await test_case(client)
+
+
+def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only(tmp_path, monkeypatch):
+  directory = prepare_tls_identity(tmp_path / "identity")
+  certificate = (directory / "server.pem").read_bytes()
+  assert prepare_tls_identity(directory) == directory
+  assert (directory / "server.pem").read_bytes() == certificate
+  assert (directory / "server.key").stat().st_mode & 0o077 == 0
+  assert not (directory / "token.sha256").exists()
+  access, context = lan.load_lan_config(directory, require_token=False)
+  access.address = ipaddress.IPv4Interface("127.0.0.1/32")
+  monkeypatch.setattr(lan, "PRIVATE_NETWORKS", (access.address.network,))
+
+  async def check():
+    store = KovaParamsStore(MemoryBackend())
+    app = create_app(store, lambda: True, lan_access=access)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+      await web.TCPSite(runner, "127.0.0.1", 0, ssl_context=context).start()
+      base = f"https://127.0.0.1:{runner.addresses[0][1]}"
+      async with ClientSession(base, connector=TCPConnector(ssl=False)) as client:
+        async with client.get("/v1/health") as response:
+          assert response.status == 200
+          assert (await response.json())["authentication"] == "localNetwork"
+        async with client.get("/v1/health", headers={"Origin": "https://example.test"}) as response:
+          assert response.status == 403
+        async with client.get("/v1/kova-params") as response:
+          settings = {setting["key"]: setting for setting in (await response.json())["settings"]}
+          assert settings[CRUISE_SYNC_KEY]["access"] == "readOnly"
+          assert settings["display.onroad_brightness_fixed"]["access"] == "readWrite"
+
+        payload = {"key": CRUISE_SYNC_KEY, "value": True, "expectedRevision": 0}
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 403
+        payload.update(key="display.onroad_brightness_fixed", value=65)
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 200
+          settings = {setting["key"]: setting for setting in (await response.json())["settings"]}
+          assert settings[CRUISE_SYNC_KEY]["access"] == "readOnly"
+          assert settings["display.onroad_brightness_fixed"]["value"] == 65
+        assert store.values()[CRUISE_SYNC_KEY] is False
+        async with client.post("/v1/git/apply", json={}) as response:
+          assert response.status == 403
+
+        access.address = ipaddress.IPv4Interface("127.0.0.2/32")
+        async with client.get("/v1/health") as response:
+          assert response.status == 403
+    finally:
+      await runner.cleanup()
+
+  asyncio.run(check())
 
 
 def test_gateway_updates_cruise_config_seen_by_another_store():

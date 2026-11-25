@@ -12,6 +12,9 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.kovapilot.gateway import DEVICE_PACKAGES
 
 
+DEVICE_IDENTITY = DEVICE_PACKAGES.parent / "identity"
+
+
 def runtime_ready(directory: Path = DEVICE_PACKAGES) -> bool:
   return (directory / "aiohttp" / "__init__.py").is_file()
 
@@ -29,6 +32,32 @@ def prepare_directory(directory: Path, *, allow_sudo: bool = False) -> None:
   info = directory.lstat()
   if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
     raise ValueError("Gateway setup directories must be owned by the regular device user and private to writes")
+
+
+def create_tls_keypair(directory: Path) -> None:
+  key = directory / "server.key"
+  subprocess.run(
+    ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+     "-nodes", "-days", "825", "-subj", "/CN=KovaLink Gateway",
+     "-keyout", str(key), "-out", str(directory / "server.pem")],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15,
+  )
+  key.chmod(0o600)
+
+
+def prepare_tls_identity(directory: Path = DEVICE_IDENTITY) -> Path:
+  prepare_directory(directory.parent)
+  with (directory.parent / ".identity.lock").open("a") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if directory.exists() or directory.is_symlink():
+      prepare_directory(directory)
+    else:
+      with tempfile.TemporaryDirectory(dir=directory.parent) as temporary:
+        staging = Path(temporary) / "identity"
+        staging.mkdir(mode=0o700)
+        create_tls_keypair(staging)
+        staging.rename(directory)
+  return directory
 
 
 def check_runtime(directory: Path) -> None:
