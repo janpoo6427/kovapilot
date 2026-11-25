@@ -50,6 +50,7 @@
       "access": "readWrite",
       "risk": "control",
       "applyPolicy": "offroad",
+      "savePolicy": "anytime",
       "availability": "pendingConsumer",
       "requiredCapabilities": ["alwaysSteering"]
     },
@@ -74,6 +75,7 @@
       "access": "readWrite",
       "risk": "control",
       "applyPolicy": "offroad",
+      "savePolicy": "anytime",
       "availability": "pendingConsumer"
     },
     {
@@ -96,6 +98,7 @@
       "access": "readWrite",
       "risk": "display",
       "applyPolicy": "immediate",
+      "savePolicy": "anytime",
       "availability": "available"
     },
     {
@@ -116,6 +119,7 @@
       "access": "readWrite",
       "risk": "display",
       "applyPolicy": "immediate",
+      "savePolicy": "anytime",
       "availability": "available"
     },
     {
@@ -131,7 +135,8 @@
       },
       "access": "readWrite",
       "risk": "control",
-      "applyPolicy": "offroad",
+      "applyPolicy": "restart",
+      "savePolicy": "anytime",
       "availability": "available"
     },
     {
@@ -147,7 +152,8 @@
       },
       "access": "readWrite",
       "risk": "behavior",
-      "applyPolicy": "parked",
+      "applyPolicy": "immediate",
+      "savePolicy": "anytime",
       "availability": "available"
     }
   ]

@@ -28,12 +28,15 @@ pins the certificate for the connection. If discovery is unavailable, use
 Devices on the same private subnet can use the Gateway's allowlisted
 telemetry, camera and settings APIs. Wi-Fi connections using only network
 access can write display, comfort and behavior settings subject to their
-existing apply policies. Control settings are read-only in this mode. Git
+save policies. Control settings are read-only in this mode. Git
 apply stays disabled. Use a network whose members you trust.
 
-The stock ACC diagnostic setting can be changed in P while the vehicle is
-stationary and disengaged, or while the device is offroad. The settings
-document reports `device.parked` separately from `device.offroad`.
+Settings with `savePolicy: anytime` accept authorized saves independently of
+ignition and gear. Brightness and stock ACC diagnostics are live. Cruise
+accelerator sync takes its saved value when `card` starts. The settings
+response reports the running process's acknowledged value separately, with
+`applyState` set to `applied`, `pendingRestart`, or `awaitingStart`.
+Saving never restarts the process.
 
 ## Optional bearer authentication
 

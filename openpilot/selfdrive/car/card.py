@@ -12,7 +12,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
-from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
+from openpilot.kovapilot.config.cruise_sync_settings import publish_applied_cruise_sync, read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
 
 from opendbc.car import DT_CTRL, structs
@@ -155,7 +155,12 @@ class Car:
     self.v_cruise_helper = VCruiseHelper(self.CP)
     self.cruise_accelerator_sync = CruiseAcceleratorSyncBridge(self.v_cruise_helper)
     self.kova_params = KovaParamsStore(ParamsKovaParamsBackend(self.params))
-    self._read_cruise_sync_settings()
+    self._read_cruise_sync_settings(starting=True)
+    if not REPLAY:
+      try:
+        publish_applied_cruise_sync(self.cruise_sync_settings[0])
+      except OSError:
+        cloudlog.warning("Unable to report the applied cruise sync setting")
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
@@ -284,8 +289,10 @@ class Car:
       self._read_cruise_sync_settings()
       time.sleep(0.1)
 
-  def _read_cruise_sync_settings(self):
+  def _read_cruise_sync_settings(self, *, starting: bool = False):
     enabled, stock_shadow = read_cruise_sync_settings(self.kova_params)
+    if not starting:
+      enabled = self.cruise_sync_settings[0]
     self.cruise_sync_settings = enabled, stock_shadow, self.params.get_bool("DisengageOnAccelerator")
 
   def card_thread(self):

@@ -54,7 +54,8 @@ def main() -> None:
   telemetry = CerealTelemetry()
   app = create_app(
     store, lambda: device_state_params.get_bool("IsOffroad"),
-    parked_provider=telemetry.is_parked, telemetry=telemetry, camera=CameraSignaling(device_state_params),
+    parked_provider=telemetry.is_parked, applied_cruise_provider=telemetry.applied_cruise_sync,
+    telemetry=telemetry, camera=CameraSignaling(device_state_params),
     git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState")),
     lan_access=lan[0] if lan else None,
   )

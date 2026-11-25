@@ -2,6 +2,7 @@ from copy import deepcopy
 
 import pytest
 
+from openpilot.kovapilot.config import cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
   CRUISE_SYNC_SHADOW_KEY,
@@ -52,6 +53,20 @@ def test_document_merges_defaults_without_writing_storage():
   assert backend.put_calls == []
 
 
+def test_applied_cruise_report_matches_only_the_running_card(tmp_path, monkeypatch):
+  monkeypatch.setattr(cruise_sync_settings, "_applied_path", lambda: tmp_path / "cruise.json")
+  monkeypatch.setattr(cruise_sync_settings.os, "getpid", lambda: 1234)
+  assert cruise_sync_settings.applied_cruise_sync(1234) is None
+  cruise_sync_settings.publish_applied_cruise_sync(False)
+  assert cruise_sync_settings.applied_cruise_sync(None) is None
+  assert cruise_sync_settings.applied_cruise_sync(1235) is None
+  assert cruise_sync_settings.applied_cruise_sync(1234) is False
+  monkeypatch.setattr(cruise_sync_settings.os, "getpid", lambda: 1235)
+  cruise_sync_settings.publish_applied_cruise_sync(True)
+  assert cruise_sync_settings.applied_cruise_sync(1234) is None
+  assert cruise_sync_settings.applied_cruise_sync(1235) is True
+
+
 def test_offroad_update_is_revisioned_and_persisted_synchronously():
   backend = MemoryBackend()
   document = KovaParamsStore(backend).update("steering.always_on", True, 0, is_offroad=True)
@@ -73,9 +88,11 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
 
 def test_onroad_update_is_rejected_without_write():
   backend = MemoryBackend()
+  catalog = load_bundled_catalog()
+  next(s for s in catalog["settings"] if s["key"] == "steering.always_on").pop("savePolicy")
 
   with pytest.raises(KovaParamsApplyPolicyError, match="offroad"):
-    KovaParamsStore(backend).update("steering.always_on", True, 0, is_offroad=False)
+    KovaParamsStore(backend, catalog).update("steering.always_on", True, 0, is_offroad=False)
 
   assert backend.put_calls == []
 

@@ -47,6 +47,7 @@
         "access": {"enum": ["readOnly", "readWrite"]},
         "risk": {"enum": ["display", "behavior", "control"]},
         "applyPolicy": {"enum": ["immediate", "offroad", "parked", "restart"]},
+        "savePolicy": {"enum": ["legacy", "anytime"]},
         "availability": {"enum": ["available", "pendingConsumer", "unsupported"]},
         "requiredCapabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "minimum": {"type": "number", "description": "integer/number only: inclusive lower bound"},

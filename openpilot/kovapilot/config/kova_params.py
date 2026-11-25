@@ -170,6 +170,8 @@ def validate_catalog(catalog: Any) -> None:
       raise KovaParamsValidationError(f"invalid access for {setting['key']}")
     if setting.get("applyPolicy") not in ("immediate", "offroad", "parked", "restart"):
       raise KovaParamsValidationError(f"invalid applyPolicy for {setting['key']}")
+    if setting.get("savePolicy", "legacy") not in ("legacy", "anytime"):
+      raise KovaParamsValidationError(f"invalid savePolicy for {setting['key']}")
     if setting.get("availability") not in ("available", "pendingConsumer", "unsupported"):
       raise KovaParamsValidationError(f"invalid availability for {setting['key']}")
     _validate_localized_text(setting.get("title"), locales, f"setting {setting['key']} title")
@@ -240,9 +242,9 @@ class KovaParamsStore:
       raise KovaParamsValidationError(f"unknown setting: {key}")
     if setting["access"] != "readWrite" or (allowed_risks is not None and setting.get("risk") not in allowed_risks):
       raise KovaParamsReadOnlyError(f"setting is read-only: {key}")
-    if setting["applyPolicy"] == "offroad" and not is_offroad:
+    if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "offroad" and not is_offroad:
       raise KovaParamsApplyPolicyError(f"setting can only be changed offroad: {key}")
-    if setting["applyPolicy"] == "parked" and not (is_offroad or is_parked):
+    if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "parked" and not (is_offroad or is_parked):
       raise KovaParamsApplyPolicyError(f"setting can only be changed when parked or offroad: {key}")
     _validate_value(setting, value)
 

@@ -3,6 +3,8 @@
 import math
 import time
 
+from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
+
 
 def _points(line):
   xs, ys, zs = line.x, line.y, line.z
@@ -57,7 +59,7 @@ class CerealTelemetry:
   def __init__(self):
     from openpilot.cereal.messaging import SubMaster
 
-    self.sm = SubMaster(["carState", "selfdriveState", "modelV2"])
+    self.sm = SubMaster(["carState", "selfdriveState", "modelV2", "managerState"])
 
   def __call__(self):
     self.sm.update(0)
@@ -66,3 +68,14 @@ class CerealTelemetry:
   def is_parked(self) -> bool:
     self.sm.update(0)
     return parked_for_settings(self.sm, time.monotonic_ns())
+
+  def applied_cruise_sync(self) -> bool | None:
+    self.sm.update(0)
+    service = "managerState"
+    age = time.monotonic_ns() - self.sm.logMonoTime[service]
+    if not self.sm.valid[service] or not 0 <= age <= 2_000_000_000:
+      return None
+    for process in self.sm[service].processes:
+      if process.name == "card" and process.running:
+        return applied_cruise_sync(process.pid)
+    return None

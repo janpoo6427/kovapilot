@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from aiohttp import ClientError, web
 
 from openpilot.kovapilot.config.kova_params import (
+  CRUISE_SYNC_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsReadOnlyError,
   KovaParamsRevisionConflict,
@@ -28,6 +29,7 @@ LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior"))
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
+APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], bool | None])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
@@ -58,10 +60,17 @@ def _device_state(request: web.Request) -> dict[str, bool]:
 def _with_device_state(request: web.Request, document: dict[str, Any], device_state: dict[str, bool] | None = None) -> dict[str, Any]:
   document["device"] = _device_state(request) if device_state is None else device_state
   allowed = _allowed_write_risks(request)
-  if allowed is not None:
-    for setting in document["settings"]:
-      if setting.get("risk") not in allowed:
-        setting["access"] = "readOnly"
+  applied_cruise = request.app.get(APPLIED_CRUISE_PROVIDER_KEY)
+  for setting in document["settings"]:
+    if allowed is not None and setting.get("risk") not in allowed:
+      setting["access"] = "readOnly"
+    if setting["key"] == CRUISE_SYNC_KEY and setting.get("savePolicy") == "anytime":
+      applied = applied_cruise() if applied_cruise is not None else None
+      if applied is None:
+        setting["applyState"] = "awaitingStart"
+      else:
+        setting["appliedValue"] = applied
+        setting["applyState"] = "applied" if applied == setting["value"] else "pendingRestart"
   return document
 
 
@@ -250,12 +259,15 @@ async def git_apply(request):
 
 
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
+               applied_cruise_provider: Callable[[], bool | None] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
   if parked_provider is not None:
     app[PARKED_PROVIDER_KEY] = parked_provider
+  if applied_cruise_provider is not None:
+    app[APPLIED_CRUISE_PROVIDER_KEY] = applied_cruise_provider
   app[SOCKETS_KEY] = set()
   app[LAN_SOCKETS_KEY] = set()
   if lan_access is not None:

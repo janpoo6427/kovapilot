@@ -75,13 +75,11 @@ def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only
         assert store.values()[CRUISE_SYNC_KEY] is False
         payload.update(key=CRUISE_SYNC_SHADOW_KEY, value=True, expectedRevision=1)
         async with client.post("/v1/kova-params/update", json=payload) as response:
-          assert response.status == 403
+          assert response.status == 200
+          assert (await response.json())["device"]["parked"] is False
         parked = True
         async with client.get("/v1/kova-params") as response:
           assert (await response.json())["device"] == {"offroad": False, "parked": True}
-        async with client.post("/v1/kova-params/update", json=payload) as response:
-          assert response.status == 200
-          assert (await response.json())["device"]["parked"] is True
         assert store.values()[CRUISE_SYNC_SHADOW_KEY] is True
         payload.update(key=CRUISE_SYNC_KEY, value=True, expectedRevision=2)
         async with client.post("/v1/kova-params/update", json=payload) as response:
@@ -102,31 +100,35 @@ def test_gateway_updates_cruise_config_seen_by_another_store():
   backend = MemoryBackend()
   runtime = KovaParamsStore(backend)
   gateway = KovaParamsStore(backend)
-  offroad = False
+  effective = None
 
   async def check():
-    nonlocal offroad
-    async with TestClient(TestServer(create_app(gateway, lambda: offroad))) as client:
+    nonlocal effective
+    async with TestClient(TestServer(create_app(gateway, lambda: False, applied_cruise_provider=lambda: effective))) as client:
       result = await client.get("/v1/kova-params")
       assert result.status == 200
       settings = {setting["key"]: setting for setting in (await result.json())["settings"]}
       assert settings[CRUISE_SYNC_KEY]["value"] is False
+      assert settings[CRUISE_SYNC_KEY]["applyState"] == "awaitingStart"
       assert settings[CRUISE_SYNC_SHADOW_KEY]["value"] is False
 
       payload = {"key": CRUISE_SYNC_KEY, "value": True, "expectedRevision": 0}
-      response = await client.post("/v1/kova-params/update", json=payload)
-      assert response.status == 403
-      assert read_cruise_sync_settings(runtime) == (False, False)
-
-      offroad = True
+      effective = False
       response = await client.post("/v1/kova-params/update", json=payload)
       assert response.status == 200
+      settings = {setting["key"]: setting for setting in (await response.json())["settings"]}
+      assert settings[CRUISE_SYNC_KEY]["applyState"] == "pendingRestart"
+      assert settings[CRUISE_SYNC_KEY]["appliedValue"] is False
       assert read_cruise_sync_settings(runtime) == (True, False)
 
       payload = {"key": CRUISE_SYNC_SHADOW_KEY, "value": True, "expectedRevision": 1}
       response = await client.post("/v1/kova-params/update", json=payload)
       assert response.status == 200
       assert read_cruise_sync_settings(runtime) == (True, True)
+      effective = True
+      result = await client.get("/v1/kova-params")
+      settings = {setting["key"]: setting for setting in (await result.json())["settings"]}
+      assert settings[CRUISE_SYNC_KEY]["applyState"] == "applied"
 
   asyncio.run(check())
 
@@ -175,15 +177,17 @@ def test_updates_setting_with_authoritative_offroad_state():
   asyncio.run(_with_client(test_case))
 
 
-def test_rejects_update_while_onroad():
+def test_saves_pending_consumer_while_onroad():
   async def test_case(client):
     response = await client.post("/v1/kova-params/update", json={
       "key": "steering.always_on",
       "value": True,
       "expectedRevision": 0,
     })
-    assert response.status == 403
-    assert (await response.json())["error"]["code"] == "update_forbidden"
+    assert response.status == 200
+    setting = next(s for s in (await response.json())["settings"] if s["key"] == "steering.always_on")
+    assert setting["applyStatus"] == "pendingConsumer"
+    assert setting["value"] is True
 
   asyncio.run(_with_client(test_case, is_offroad=False))
 
