@@ -1,15 +1,20 @@
-"""Run the first loopback-only KovaLink gateway."""
+"""Run the KovaLink Gateway with optional authenticated Wi-Fi access."""
 
 import argparse
+import asyncio
+from pathlib import Path
 
 from aiohttp import web
 
 from openpilot.common.basedir import BASEDIR
+from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway.camera import CameraSignaling
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
+from openpilot.kovapilot.gateway.lan import load_lan_config, serve_lan
 from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
 
@@ -18,7 +23,7 @@ DEFAULT_PORT = 8082
 
 
 def main() -> None:
-  parser = argparse.ArgumentParser(description="KovaLink loopback gateway")
+  parser = argparse.ArgumentParser(description="KovaLink gateway")
   parser.add_argument("--port", type=int, default=DEFAULT_PORT)
   args = parser.parse_args()
   if not 1 <= args.port <= 65535:
@@ -27,12 +32,21 @@ def main() -> None:
   settings_params = Params()
   device_state_params = Params()
   store = KovaParamsStore(ParamsKovaParamsBackend(settings_params))
+  lan = None
+  try:
+    lan = load_lan_config(Path(Paths.persist_root()) / "kova" / "gateway")
+  except (OSError, ValueError):
+    cloudlog.warning("KovaLink Gateway Wi-Fi disabled: invalid TLS or credential configuration")
   app = create_app(
     store, lambda: device_state_params.get_bool("IsOffroad"),
     telemetry=CerealTelemetry(), camera=CameraSignaling(device_state_params),
     git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState")),
+    lan_access=lan[0] if lan else None,
   )
-  web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
+  if lan is None:
+    web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
+  else:
+    asyncio.run(serve_lan(app, args.port, lan[1], lambda: cloudlog.warning("KovaLink Gateway Wi-Fi bind failed")))
 
 
 if __name__ == "__main__":

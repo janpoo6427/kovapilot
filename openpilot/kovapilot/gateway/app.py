@@ -1,4 +1,4 @@
-"""Loopback-only KovaLink gateway application."""
+"""KovaLink Gateway application for loopback and authenticated Wi-Fi."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from openpilot.kovapilot.config.kova_params import (
 )
 from openpilot.kovapilot.gateway.camera import camera_offer
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
+from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 
 
 API_SCHEMA_VERSION = 1
@@ -53,8 +54,8 @@ async def health(request: web.Request) -> web.Response:
   return web.json_response({
     "status": "ok",
     "schemaVersion": API_SCHEMA_VERSION,
-    "bindScope": "loopback",
-    "authentication": "localProcessOnly",
+    "bindScope": "wifi" if request.secure else "loopback",
+    "authentication": "bearer" if request.secure else "localProcessOnly",
   })
 
 
@@ -112,6 +113,18 @@ async def update_kova_params(request: web.Request) -> web.Response:
 
 @web.middleware
 async def local_client(request, handler):
+  if request.secure:
+    access = request.app.get(LAN_ACCESS_KEY)
+    local = request.transport.get_extra_info("sockname") if request.transport else None
+    if (access is None or not local or not access.accepts_peer(local[0], request.remote or "")
+        or request.host not in (local[0], f"{local[0]}:{local[1]}") or "Origin" in request.headers):
+      return _error(403, "wifi_client_required", "use the device Wi-Fi IPv4 address")
+    auth = request.headers.getall("Authorization", [])
+    if len(auth) != 1 or not access.authenticates(auth[0]):
+      response = _error(401, "authentication_required", "valid Gateway credentials are required")
+      response.headers["WWW-Authenticate"] = "Bearer"
+      return response
+    return await handler(request)
   if request.remote not in ("127.0.0.1", "::1") or request.headers.get("Origin") is not None:
     return _error(403, "local_client_required", "only native loopback clients are supported")
   host = request.host
@@ -129,6 +142,9 @@ async def telemetry_stream(request):
     return _error(503, "telemetry_busy", "too many telemetry clients")
   ws = web.WebSocketResponse(heartbeat=15, max_msg_size=1024, compress=False)
   sockets.add(ws)
+  lan_sockets = request.app[LAN_SOCKETS_KEY]
+  if request.secure:
+    lan_sockets.add(ws)
 
   async def publish():
     try:
@@ -154,6 +170,7 @@ async def telemetry_stream(request):
         await publisher
   finally:
     sockets.discard(ws)
+    lan_sockets.discard(ws)
   return ws
 
 
@@ -215,11 +232,15 @@ async def git_apply(request):
   return _error(403, "git_mutation_disabled", "authenticated updater integration is unavailable")
 
 
-def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, telemetry=None, camera=None, git=None) -> web.Application:
+def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, telemetry=None, camera=None, git=None,
+               lan_access=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
   app[SOCKETS_KEY] = set()
+  app[LAN_SOCKETS_KEY] = set()
+  if lan_access is not None:
+    app[LAN_ACCESS_KEY] = lan_access
   app[GIT_LOCK_KEY] = asyncio.Lock()
   if telemetry is not None:
     app[TELEMETRY_KEY] = telemetry
