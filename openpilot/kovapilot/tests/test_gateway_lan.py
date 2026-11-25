@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import hashlib
 import ipaddress
 import socket
@@ -20,6 +21,39 @@ def test_accepts_only_current_private_wifi_subnet():
   assert not access.accepts_peer("192.168.43.19", "192.168.43.1")
   assert not access.accepts_peer("192.168.43.20", "192.168.44.1")
   assert not access.accepts_peer("192.168.43.20", "2606:4700::1")
+
+
+@pytest.mark.parametrize("option_error", [PermissionError(errno.EPERM, "not permitted"), OSError(errno.ENODEV, "missing")])
+def test_wifi_socket_uses_exact_address_when_interface_option_requires_privilege(monkeypatch, option_error):
+  option = getattr(socket, "SO_BINDTODEVICE", 25)
+  monkeypatch.setattr(socket, "SO_BINDTODEVICE", option, raising=False)
+
+  class Socket:
+    bound = None
+    closed = False
+
+    def setsockopt(self, level, option_name, value):
+      if option_name == option:
+        raise option_error
+
+    def bind(self, endpoint):
+      self.bound = endpoint
+
+    def close(self):
+      self.closed = True
+
+  sock = Socket()
+  monkeypatch.setattr(socket, "socket", lambda *_: sock)
+  address = ipaddress.IPv4Interface("192.168.43.20/24")
+  if isinstance(option_error, PermissionError):
+    assert lan.wifi_socket(address, 8082) is sock
+    assert sock.bound == ("192.168.43.20", 8082)
+    assert not sock.closed
+  else:
+    with pytest.raises(OSError, match="missing"):
+      lan.wifi_socket(address, 8082)
+    assert sock.bound is None
+    assert sock.closed
 
 
 def test_lan_https_and_websocket_require_credentials(tmp_path, monkeypatch):

@@ -86,7 +86,12 @@ def wifi_socket(address: ipaddress.IPv4Interface, port: int) -> socket.socket:
   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   try:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, WIFI_INTERFACE.encode() + b"\0")
+    try:
+      sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, WIFI_INTERFACE.encode() + b"\0")
+    except PermissionError:
+      # Some AGNOS kernels reserve this option for privileged processes.
+      # The listener still binds only the discovered interface address.
+      pass
     sock.bind((str(address.ip), port))
     return sock
   except (OSError, AttributeError):

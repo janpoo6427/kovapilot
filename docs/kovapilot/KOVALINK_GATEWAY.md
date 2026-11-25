@@ -3,7 +3,10 @@
 The manager starts the Gateway when `KovaLinkGatewayEnabled` is set. Its native
 loopback endpoint remains `http://127.0.0.1:8082`. Optional Wi-Fi access uses
 TLS on the current private IPv4 address of `wlan0`, for clients on that subnet.
-The listener follows Wi-Fi address changes and closes old WebSockets.
+The listener follows Wi-Fi address changes and closes old WebSockets. When
+AGNOS restricts interface binding to privileged users, the regular Gateway
+process binds the exact Wi-Fi address and enforces the same peer and
+authentication checks on each request.
 
 ## Wi-Fi connection
 
