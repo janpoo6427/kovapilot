@@ -1,10 +1,11 @@
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import isfinite
 
 from openpilot.kovapilot.longitudinal.shadow import SpeedCandidate, select_candidate
 from openpilot.kovapilot.navigation.camera_input import CameraInput, CameraInputs, MAX_CAMERA_AGE_NS
 from openpilot.kovapilot.navigation.camera_profile import (
-  PROFILE_ACCEL_MPS2, RECOVERY_ACCEL_MPS2, SpeedRamp, speed_ramp, target_distance,
+  PROFILE_ACCEL_MPS2, PROFILE_JERK_MPS3, RECOVERY_ACCEL_MPS2, SpeedRamp, speed_ramp, target_distance,
 )
 
 
@@ -12,6 +13,10 @@ from openpilot.kovapilot.navigation.camera_profile import (
 class Approach:
   initial_distance_m: float
   target_mps: float
+  decel_limit_mps2: float = PROFILE_ACCEL_MPS2
+  jerk_limit_mps3: float = PROFILE_JERK_MPS3
+  response_time_s: float = 0.0
+  response_distance_m: float = 0.0
   ramp: SpeedRamp | None = None
   start_distance_m: float | None = None
   progress_m: float = 0.0
@@ -32,11 +37,14 @@ class Approach:
       self.reached_distance_m = distance_m
 
     if self.ramp is None:
-      minimum = speed_ramp(max(ego_mps, self.target_mps), self.target_mps, PROFILE_ACCEL_MPS2)
+      reserve_m = ego_mps * self.response_time_s if ego_mps > self.target_mps else 0.0
+      minimum = speed_ramp(max(ego_mps, self.target_mps), self.target_mps, self.decel_limit_mps2, max_jerk_mps3=self.jerk_limit_mps3)
       # Allow one model update of travel to avoid crossing the calculated start between frames.
-      if profile == 1 or distance_m <= finish_m + minimum.distance_m + ego_mps * 0.05:
+      if profile == 1 or distance_m <= finish_m + reserve_m + minimum.distance_m + ego_mps * 0.05:
         self.start_distance_m = distance_m
-        self.ramp = speed_ramp(minimum.start_mps, self.target_mps, PROFILE_ACCEL_MPS2, distance_m - finish_m)
+        self.response_distance_m = reserve_m
+        self.ramp = speed_ramp(minimum.start_mps, self.target_mps, self.decel_limit_mps2, distance_m - finish_m - reserve_m,
+                               max_jerk_mps3=self.jerk_limit_mps3)
 
     planned_finish = None
     phase = "waiting"
@@ -44,7 +52,7 @@ class Approach:
     if self.ramp is not None:
       self.progress_m = max(self.progress_m, self.start_distance_m - distance_m)
       self.last_cap_mps = self.ramp.speed_at_distance(self.progress_m)
-      planned_finish = self.start_distance_m - self.ramp.distance_m
+      planned_finish = self.start_distance_m - self.ramp.distance_m - self.response_distance_m
       phase = "holding" if self.progress_m >= self.ramp.distance_m else "approach"
     self.was_eligible = eligible
     return {
@@ -72,8 +80,12 @@ class Recovery:
 
 
 class CameraShadow:
-  def __init__(self, profile: int):
+  def __init__(self, profile: int, *, decel_limit_mps2: float = PROFILE_ACCEL_MPS2, jerk_limit_mps3: float = PROFILE_JERK_MPS3,
+               response_time_s: float = 0.0):
     self.profile = profile
+    self.decel_limit_mps2 = decel_limit_mps2
+    self.jerk_limit_mps3 = jerk_limit_mps3
+    self.response_time_s = response_time_s
     self.inputs = CameraInputs()
     self.approaches: dict[str, Approach] = {}
     self.initial_distances: dict[str, float] = {}
@@ -91,7 +103,7 @@ class CameraShadow:
       self.initial_distances.setdefault(event.event_id, event.distance_m)
 
   def observe(self, now_ns: int, ego_mps: float | None, cruise_mps: float | None,
-              curve: SpeedCandidate | None) -> dict:
+              curve: SpeedCandidate | None, *, traveled_since: Callable[[int], float] | None = None) -> dict:
     eligible = cruise_mps is not None
     current, excluded = self.inputs.current(now_ns)
     excluded.extend({"source": source, "reason": reason} for source, reason in sorted(self.rejected))
@@ -126,9 +138,11 @@ class CameraShadow:
       initial_m = self.initial_distances[event_id]
       plan = self.approaches.get(event_id)
       if plan is None or plan.target_mps != winner.target_mps:
-        plan = self.approaches[event_id] = Approach(initial_m, winner.target_mps)
+        plan = self.approaches[event_id] = Approach(initial_m, winner.target_mps, self.decel_limit_mps2,
+                                                    self.jerk_limit_mps3, self.response_time_s)
       active_ids.add(event_id)
-      result = plan.sample(self.profile, winner.distance_m, ego_mps, now_ns, eligible)
+      distance_m = max(0.0, winner.distance_m - traveled_since(winner.observed_ns)) if traveled_since else winner.distance_m
+      result = plan.sample(self.profile, distance_m, ego_mps, now_ns, eligible)
       report["cameras"].append({"source": winner.source, **result})
       if result["speed_cap_mps"] is not None:
         candidates.append(SpeedCandidate(f"camera:{winner.source}", result["speed_cap_mps"], now_ns))

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from math import isfinite
+
 import numpy as np
 
 import openpilot.cereal.messaging as messaging
@@ -19,12 +21,13 @@ from openpilot.common.swaglog import cloudlog
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
 J_CRUISE_BP = [0., 10.0, 25., 40.]
 A_CRUISE_MIN = -0.5
+CRUISE_ACCEL_RESPONSE_TIME = 1.0
 AGGRESSIVE_ACCEL_BOOST = 0.1  # m/s^2
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 
 def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt):
-  target_accel = smooth_value(v_cruise - v_ego, a_cruise_prev, tau=1.0, dt=dt)
+  target_accel = smooth_value(v_cruise - v_ego, a_cruise_prev, tau=CRUISE_ACCEL_RESPONSE_TIME, dt=dt)
   target_accel = np.clip(target_accel, A_CRUISE_MIN, ACCEL_MAX)
   j_cruise = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS)
   target_accel = float(np.clip(target_accel, min(a_cruise_prev, a_target_prev) - j_cruise * dt, a_cruise_prev + j_cruise * dt))
@@ -42,6 +45,7 @@ class LongitudinalPlanner:
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.a_cruise = init_a
+    self.a_camera = None
     self.output_a_target = init_a
     self.output_should_stop = False
 
@@ -49,7 +53,7 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm):
+  def update(self, sm, *, camera_speed_cap=None, camera_eligible=False):
     v_ego = sm['carState'].vEgo
     personality = sm['selfdriveState'].personality
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
@@ -108,12 +112,28 @@ class LongitudinalPlanner:
       output_a_target_e2e += AGGRESSIVE_ACCEL_BOOST * speed_scale * accel_scale
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
-    self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.output_a_target, self.dt)
+    a_cruise_prev = self.a_cruise
+    self.a_cruise = get_cruise_accel(v_cruise, v_ego, a_cruise_prev, self.output_a_target, self.dt)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop),
                   (output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e)]
+
+    if camera_eligible and self.CP.openpilotLongitudinalControl and not reset_state and not sm['controlsState'].forceDecel:
+      if camera_speed_cap is not None and isfinite(camera_speed_cap) and 0 < camera_speed_cap < v_cruise:
+        camera_prev = self.a_camera if self.a_camera is not None else a_cruise_prev
+        self.a_camera = get_cruise_accel(camera_speed_cap, v_ego, camera_prev, self.output_a_target, self.dt)
+      elif self.a_camera is not None:
+        # An expired cap is released at the existing positive cruise jerk limit.
+        step = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS) * self.dt
+        self.a_camera = min(self.a_camera + step, self.a_cruise)
+        if self.a_camera >= self.a_cruise:
+          self.a_camera = None
+      if self.a_camera is not None:
+        candidates.append((self.a_camera, LongitudinalPlanSource.cruise, False))
+    else:
+      self.a_camera = None
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
