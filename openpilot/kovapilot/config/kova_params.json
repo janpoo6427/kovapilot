@@ -12,6 +12,12 @@
         "ko": "차량의 횡방향 제어와 관련된 사용자 설정입니다.",
         "en": "User settings related to lateral vehicle control."
       }
+    },
+    {
+      "id": "navigation",
+      "order": 200,
+      "title": {"ko": "내비게이션", "en": "Navigation"},
+      "description": {"ko": "내비게이션 기반 주행 보조 설정입니다.", "en": "Navigation-based driving assistance settings."}
     }
   ],
   "settings": [
@@ -31,6 +37,29 @@
       "applyPolicy": "offroad",
       "availability": "pendingConsumer",
       "requiredCapabilities": ["alwaysSteering"]
+    },
+    {
+      "key": "navigation.speed_camera_profile",
+      "groupId": "navigation",
+      "order": 100,
+      "type": "enum",
+      "options": [0, 1, 2, 3],
+      "optionLabels": {
+        "0": {"ko": "사용 안 함", "en": "Off"},
+        "1": {"ko": "여유", "en": "Early"},
+        "2": {"ko": "균형", "en": "Balanced"},
+        "3": {"ko": "근접", "en": "Late"}
+      },
+      "defaultValue": 0,
+      "title": {"ko": "카메라 감속 프로필", "en": "Speed camera profile"},
+      "description": {
+        "ko": "카메라 목표속도 도달 지점과 통과 후 복귀 성향을 설정합니다.",
+        "en": "Selects where to reach the camera target speed and how quickly to resume after passing."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "availability": "pendingConsumer"
     }
   ]
 }

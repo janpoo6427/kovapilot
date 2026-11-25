@@ -74,7 +74,7 @@ def _validate_value(setting: dict[str, Any], value: Any) -> None:
     "integer": type(value) is int,
     "number": type(value) in (int, float) and math.isfinite(value),
     "string": isinstance(value, str),
-    "enum": value in setting.get("options", []),
+    "enum": any(type(value) is type(option) and value == option for option in setting.get("options", [])),
   }.get(setting_type, False)
   if not valid:
     raise KovaParamsValidationError(f"invalid value for {setting['key']}: expected {setting_type}")

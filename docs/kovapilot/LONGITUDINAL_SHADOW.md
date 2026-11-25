@@ -11,3 +11,31 @@ python -m openpilot.kovapilot.longitudinal.replay_shadow /path/to/rlog.zst > /pa
 첫 후보 `model_curve`는 향후 6초간 모델의 종방향 속도와 yaw rate에서 곡률을 추정하고, 횡가속도 관측 기준 2.8 m/s²에 해당하는 속도를 계산한다. 이는 오프라인 비교용 기준값이다. 직접 종방향 지원, 유효한 모델과 차량 상태, 활성 종방향 제어, 초기화된 설정속도를 요구한다. 페달·CANCEL 개입, 순정 ACC, 강제 감속, 유실 또는 250 ms보다 오래된 상태에서는 후보 선정을 건너뛴다. 세그먼트 중간에 `carParams`가 처음 나오면 그 전 프레임은 `longitudinal_unavailable`로 기록한다. 이전 로그의 설정속도는 기존 process replay의 `migrate_carState`로 읽는다.
 
 EV6 기준선을 재현하려면 `opendbc_repo/opendbc/car/tests/routes.py`의 세 번째 `HYUNDAI.KIA_EV6` 공개 route에서 full rlog 0번과 2번을 사용한다. 원본 `carParams.openpilotLongitudinalControl`, `carControl.longActive`를 확인한 뒤 `replay_process_with_name`으로 `plannerd`와 `controlsd`를 각각 재생할 수 있다. shadow 유무를 비교할 때 `logMonoTime`, `longitudinalPlan.processingDelay`, `longitudinalPlan.solverExecutionTime`은 실행 타이밍 필드로 제외한다.
+
+## 내비 카메라 프로필 리플레이
+
+`--navigation`은 순정과 여러 외부 제공자에서 정규화한 카메라 JSONL을 읽는다. `--kova-params`는 재현할 설정의 `KovaParams` 상태를 읽는다. 둘 다 로컬 파일이며 기존 `plannerd`·`controlsd` 출력은 그대로 사용한다.
+
+```bash
+python -m openpilot.kovapilot.longitudinal.replay_shadow /path/to/rlog.zst \
+  --navigation /path/to/cameras.jsonl --kova-params /path/to/kova_params_state.json > /path/to/shadow.jsonl
+```
+
+설정 상태 예시
+
+```json
+{"schemaVersion": 1, "revision": 0, "values": {"navigation.speed_camera_profile": 2}}
+```
+
+`0` 사용 안 함이 기본값이다. `1` 여유는 첫 수신부터 감속하며 필요 거리 여유가 있으면 접근의 첫 1/4 지점에 목표속도 도달을 계획한다. `2` 균형은 최초 남은 거리의 절반, `3` 근접은 직전 여유 거리에서 목표속도에 도달한다. 직전 여유는 최소 20m와 목표속도로 2초 주행하는 거리 중 큰 값으로 계산한다. 공통 감속도·jerk 한계 내에서 목표를 맞추기 어려우면 실제 계산된 도달 예상 지점을 별도로 기록한다. 통과는 별도의 `passed` 입력으로 확인하며 그 이후에만 프로필별 속도로 상한을 해제한다. 여유의 1/4 지점 및 감속·복귀 수치는 초기 오프라인 검증값이다.
+
+카메라 입력의 한 줄 예시
+
+```json
+{"source":"vehicle","session":"a","event_id":"camera_1","sequence":1,"observed_ns":100000000000,"received_ns":100000000000,"state":"present","road_match":true,"distance_m":400,"target_mps":16.67}
+```
+
+- `source`는 `vehicle`, `external_a`처럼 개인 정보가 없는 제공자 별칭을 사용한다. 같은 카메라는 소스가 달라도 같은 정규화 `event_id`를 쓰고, 이후 별개 접근에는 새 이벤트 ID를 쓴다. 도로 일치 여부와 중복 매칭은 입력을 정규화하는 단계에서 판단한다.
+- 두 시각은 rlog와 같은 단조 시계 기준이다. `observed_ns`는 재전송이 업데이트하지 않는 최초 원본 관측 시각, `received_ns`는 리플레이에서 행을 전달할 시각이다. 마지막 유효 관측이 2초를 넘으면 후보를 해제한다. 재전송은 수명이나 절반 기준을 연장하지 않는다.
+- `present`는 거리와 목표속도를 요구한다. `clear`는 해당 소스의 이벤트만 제거하며 거리·속도를 생략할 수 있다. `passed`는 확인된 통과를 의미하고 0 이하의 거리를 요구한다. 이탈이나 데이터 만료는 통과와 구분한다.
+- `navigation` 결과에는 카메라별 상태, 제외 사유, 목표·예상·원래 로그에서 관측한 도달 거리와 원래 로그의 목표속도 초과 시간이 포함된다. 카메라 상한은 기존 모델 곡선 상한과 비교한다. 기존 제어 조건이 충족될 때만 `selected_candidate`를 기록한다. `--navigation` 생략 시 기존 JSONL 형식을 사용한다.
