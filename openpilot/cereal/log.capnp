@@ -2538,6 +2538,28 @@ struct Touch {
   value @4 :Int32;
 }
 
+# Internal input from a local navigation adapter. Adapters establish road,
+# direction and camera identity before declaring a single point verified.
+struct KovaCameraEvent {
+  source @0 :Text;
+  session @1 :Text;
+  eventId @2 :Text;
+  sequence @3 :UInt64;
+  observedMonoTime @4 :UInt64;  # original local monotonic reception, nanoseconds
+  state @5 :State;
+  roadMatch @6 :Bool;
+  verifiedSinglePoint @7 :Bool;
+  distanceM @8 :Float32;
+  targetMps @9 :Float32;
+
+  enum State {
+    unknown @0;
+    present @1;
+    clear @2;
+    passed @3;
+  }
+}
+
 struct Event {
   logMonoTime @0 :UInt64;  # nanoseconds
   valid @67 :Bool = true;
@@ -2725,6 +2747,7 @@ struct Event {
     uploaderStateDEPRECATED @79 :UploaderState;
     navInstruction @82 :NavInstruction;
     navRoute @83 :NavRoute;
+    kovaCameraEvents @154 :List(KovaCameraEvent);
     navThumbnailDEPRECATED @84 :Thumbnail;
     gnssMeasurementsDEPRECATED @91 :GnssMeasurements;
     mapRenderStateDEPRECATED @105: MapRenderState;

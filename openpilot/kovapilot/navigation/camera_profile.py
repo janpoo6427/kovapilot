@@ -54,15 +54,16 @@ class SpeedRamp:
     return self.sample(high)[1]
 
 
-def speed_ramp(start_mps: float, target_mps: float, max_accel_mps2: float, distance_m: float = 0.0) -> SpeedRamp:
+def speed_ramp(start_mps: float, target_mps: float, max_accel_mps2: float, distance_m: float = 0.0,
+               *, max_jerk_mps3: float = PROFILE_JERK_MPS3) -> SpeedRamp:
   delta = abs(target_mps - start_mps)
   if delta == 0.0:
     return SpeedRamp(start_mps, target_mps, 0.0, 0.0, 0.0)
-  ramp_s = min(max_accel_mps2 / PROFILE_JERK_MPS3, sqrt(delta / PROFILE_JERK_MPS3))
-  hold_s = max(0.0, delta / (PROFILE_JERK_MPS3 * ramp_s) - ramp_s)
+  ramp_s = min(max_accel_mps2 / max_jerk_mps3, sqrt(delta / max_jerk_mps3))
+  hold_s = max(0.0, delta / (max_jerk_mps3 * ramp_s) - ramp_s)
   min_distance = (start_mps + target_mps) / 2 * (2 * ramp_s + hold_s)
   stretch = max(1.0, distance_m / min_distance)
-  jerk = PROFILE_JERK_MPS3 if target_mps > start_mps else -PROFILE_JERK_MPS3
+  jerk = max_jerk_mps3 if target_mps > start_mps else -max_jerk_mps3
   return SpeedRamp(start_mps, target_mps, ramp_s * stretch, hold_s * stretch, jerk / stretch**2)
 
 
