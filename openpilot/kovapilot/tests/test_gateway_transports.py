@@ -147,6 +147,46 @@ def test_gateway_fetches_current_branch_tips_without_changing_checkout(tmp_path)
   asyncio.run(run())
 
 
+def test_authorized_git_apply_queues_pinned_target_and_does_not_change_live_checkout(tmp_path):
+  def git(*args):
+    return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+  git("init", "-q", "-b", "main")
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "main")
+  installed = git("rev-parse", "HEAD")
+  git("switch", "-qc", "next")
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "next")
+  target = git("rev-parse", "HEAD")
+  git("switch", "-q", "main")
+  git("remote", "add", "origin", ".")
+  jobs = []
+  repo = GitRepository(tmp_path, maintenance_state=lambda: jobs[0] if jobs else None, apply_allowed=lambda: True, enqueue=jobs.append)
+
+  async def run():
+    app = create_app(KovaParamsStore(None), lambda: True, git=repo)
+    async with TestClient(TestServer(app)) as client:
+      data = {"operation": "switch", "branch": "next"}
+      async with client.post("/v1/git/plan", json=data) as response:
+        assert response.status == 200
+        plan = await response.json()
+      assert plan["commit"] == target and plan["mutationEnabled"]
+      assert (await client.post("/v1/git/apply", json=dict(data, planDigest="0" * 64))).status == 409
+      edit = tmp_path / "untracked"
+      edit.touch()
+      assert (await client.post("/v1/git/apply", json=dict(data, planDigest=plan["planDigest"]))).status == 403
+      edit.unlink()
+      assert not jobs
+      async with client.post("/v1/git/apply", json=dict(data, planDigest=plan["planDigest"])) as response:
+        assert response.status == 202
+        assert (await response.json())["maintenance"]["phase"] == "queued"
+      assert jobs[0]["beforeHead"] == installed
+      assert jobs[0]["commit"] == jobs[0]["branchHead"] == target
+      assert (await client.post("/v1/git/apply", json=dict(data, planDigest=plan["planDigest"]))).status == 403
+      assert git("rev-parse", "HEAD") == installed
+
+  asyncio.run(run())
+
+
 def test_parked_configuration_requires_fresh_can_park_and_no_engagement():
   class Sample(dict):
     valid = {"carState": True, "selfdriveState": True}

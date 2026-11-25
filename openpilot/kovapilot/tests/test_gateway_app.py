@@ -9,6 +9,8 @@ from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_set
 from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, CURVE_SLOWDOWN_KEY, KOVA_PARAMS_KEY, KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
+from openpilot.kovapilot.gateway.git_maintenance import GitRepository
+from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONG_KEY, PARAM as NATIVE_LONG_PARAM, NativeLongitudinal
 from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
 
 
@@ -47,8 +49,10 @@ def test_same_subnet_can_save_control_preferences_without_a_token(tmp_path, monk
     parked = False
     applied_curve = 0
     store = KovaParamsStore(MemoryBackend())
+    jobs = []
     app = create_app(store, lambda: False, parked_provider=lambda: parked, applied_cruise_provider=lambda: 0,
-                     applied_curve_provider=lambda: applied_curve, lan_access=access)
+                     applied_curve_provider=lambda: applied_curve, lan_access=access,
+                     git=GitRepository(tmp_path, apply_allowed=lambda: True, enqueue=jobs.append))
     runner = web.AppRunner(app)
     await runner.setup()
     try:
@@ -113,6 +117,7 @@ def test_same_subnet_can_save_control_preferences_without_a_token(tmp_path, monk
         assert store.values()[CURVE_SLOWDOWN_KEY] == 1
         async with client.post("/v1/git/apply", json={}) as response:
           assert response.status == 403
+        assert not jobs
 
         access.address = ipaddress.IPv4Interface("127.0.0.2/32")
         async with client.get("/v1/health") as response:
@@ -139,6 +144,48 @@ def test_curve_slowdown_preference_is_saved_and_remains_pending():
         assert "appliedValue" not in setting
 
   asyncio.run(_with_client(check, is_offroad=False))
+
+
+def test_native_longitudinal_exposes_numeric_preference_only_when_supported_and_parked():
+  supported, parked, applied = False, False, False
+  values = {NATIVE_LONG_PARAM: False}
+
+  class Params:
+    def get_bool(self, key):
+      return values[key]
+
+    def put_bool(self, key, value, *, block):
+      assert block
+      values[key] = value
+
+  native = NativeLongitudinal(Params(), lambda: (supported, applied), lambda: parked)
+
+  async def run():
+    nonlocal supported, parked, applied
+    app = create_app(KovaParamsStore(MemoryBackend()), lambda: False, native_longitudinal=native)
+    async with TestClient(TestServer(app)) as client:
+      payload = {"key": NATIVE_LONG_KEY, "value": 1, "expectedRevision": 0, "expectedValue": 0}
+      async with client.get("/v1/kova-params") as response:
+        item = next(s for s in (await response.json())["settings"] if s["key"] == NATIVE_LONG_KEY)
+      assert item["access"] == "readOnly" and item["availability"] == "unsupported"
+      assert (await client.post("/v1/kova-params/update", json=payload)).status == 403
+      supported = True
+      assert (await client.post("/v1/kova-params/update", json=payload)).status == 403
+      parked = True
+      assert (await client.post("/v1/kova-params/update", json=dict(payload, value=True))).status == 400
+      async with client.post("/v1/kova-params/update", json=payload) as response:
+        assert response.status == 200
+        item = next(s for s in (await response.json())["settings"] if s["key"] == NATIVE_LONG_KEY)
+      assert type(item["value"]) is int and item["value"] == 1 and item["appliedValue"] == 0
+      assert item["applyState"] == "pendingRestart"
+      assert values[NATIVE_LONG_PARAM] is True
+      assert (await client.post("/v1/kova-params/update", json=payload)).status == 409
+      applied = True
+      async with client.get("/v1/kova-params") as response:
+        item = next(s for s in (await response.json())["settings"] if s["key"] == NATIVE_LONG_KEY)
+      assert item["applyState"] == "applied"
+
+  asyncio.run(run())
 
 
 def test_gateway_updates_cruise_config_seen_by_another_store():

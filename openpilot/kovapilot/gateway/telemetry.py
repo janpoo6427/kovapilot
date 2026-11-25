@@ -49,7 +49,7 @@ class CerealTelemetry:
   def __init__(self):
     from openpilot.cereal.messaging import SubMaster
 
-    self.sm = SubMaster(["carState", "selfdriveState", "modelV2", "managerState"])
+    self.sm = SubMaster(["carState", "carControl", "selfdriveState", "modelV2", "managerState"])
 
   def __call__(self):
     self.sm.update(0)
@@ -58,6 +58,14 @@ class CerealTelemetry:
   def is_parked(self) -> bool:
     self.sm.update(0)
     return parked_for_settings(self.sm, time.monotonic_ns())
+
+  def is_parked_and_disengaged(self) -> bool:
+    self.sm.update(0)
+    now = time.monotonic_ns()
+    if not parked_for_settings(self.sm, now) or not fresh_message(self.sm, now, "carControl"):
+      return False
+    control = self.sm["carControl"]
+    return not (control.enabled or control.latActive or control.longActive or self.sm["selfdriveState"].active)
 
   def applied_cruise_sync(self) -> int | None:
     return applied_cruise_sync(self._running_pid("card"))

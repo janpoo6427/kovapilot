@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from contextlib import suppress
 from subprocess import SubprocessError
@@ -20,8 +21,9 @@ from openpilot.kovapilot.config.kova_params import (
   KovaParamsValidationError,
 )
 from openpilot.kovapilot.gateway.camera import camera_offer
-from openpilot.kovapilot.gateway.git_maintenance import GitFetchError, GitRepository
+from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
+from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
 
 
 API_SCHEMA_VERSION = 1
@@ -37,6 +39,7 @@ SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
 GIT_KEY = web.AppKey("git", GitRepository)
 GIT_LOCK_KEY = web.AppKey("git_lock", asyncio.Lock)
+NATIVE_LONGITUDINAL = web.AppKey("native_longitudinal", NativeLongitudinal)
 
 
 class OffroadProvider(Protocol):
@@ -89,6 +92,9 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
           setting["applyState"] = "applied"
         else:
           setting["applyState"] = "pendingParked" if setting["applyPolicy"] == "parked" else "pendingRestart"
+  native = request.app.get(NATIVE_LONGITUDINAL)
+  if native is not None:
+    document["settings"].append(native.setting())
   return document
 
 
@@ -114,6 +120,8 @@ def _parse_update_payload(payload: Any) -> tuple[str, Any, int]:
   if not isinstance(payload, dict):
     raise KovaParamsValidationError("request body must be a JSON object")
   expected_fields = {"key", "value", "expectedRevision"}
+  if payload.get("key") == NATIVE_LONGITUDINAL_KEY:
+    expected_fields.add("expectedValue")
   if set(payload) != expected_fields:
     raise KovaParamsValidationError("request fields must be key, value, and expectedRevision")
   key = payload["key"]
@@ -140,15 +148,24 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(403, "update_forbidden", "curve slowdown requires openpilot longitudinal control")
   device_state = _device_state(request)
   try:
-    document = await asyncio.to_thread(
-      store.update,
-      key,
-      value,
-      expected_revision,
-      is_offroad=device_state["offroad"],
-      is_parked=device_state["parked"],
-      allowed_risks=_allowed_write_risks(request),
-    )
+    if key == NATIVE_LONGITUDINAL_KEY and (native := request.app.get(NATIVE_LONGITUDINAL)) is not None:
+      expected_value = payload["expectedValue"]
+      if any(type(v) is not int or v not in (0, 1) for v in (value, expected_value)):
+        raise KovaParamsValidationError("expected integer values 0 or 1")
+      document = await asyncio.to_thread(store.document)
+      if document["revision"] != expected_revision:
+        raise KovaParamsRevisionConflict("settings changed")
+      native.save(value, expected_value)
+    else:
+      document = await asyncio.to_thread(
+        store.update,
+        key,
+        value,
+        expected_revision,
+        is_offroad=device_state["offroad"],
+        is_parked=device_state["parked"],
+        allowed_risks=_allowed_write_risks(request),
+      )
   except KovaParamsRevisionConflict as exc:
     return _error(409, "revision_conflict", str(exc))
   except (KovaParamsApplyPolicyError, KovaParamsReadOnlyError) as exc:
@@ -241,6 +258,11 @@ async def stream_offer(request):
     return _error(503, "camera_unavailable", "camera signaling did not complete")
 
 
+def _git_authorized(request):
+  access = request.app.get(LAN_ACCESS_KEY)
+  return not request.secure or (access is not None and access.token_digest is not None)
+
+
 async def git_api(request):
   repo = request.app.get(GIT_KEY)
   if repo is None:
@@ -253,14 +275,14 @@ async def git_api(request):
         raise ValueError
       callback, args = repo.log, (limit, cursor)
     elif action == "status":
-      callback, args = repo.status, ()
+      callback, args = repo.status, (_git_authorized(request),)
     elif action == "branches":
       callback, args = repo.branches, ()
     else:
       body = await request.json()
       if not isinstance(body, dict) or set(body) - {"operation", "branch", "commit"}:
         raise ValueError
-      callback, args = repo.plan, (body.get("operation", action), body.get("branch"), body.get("commit"))
+      callback, args = repo.plan, (body.get("operation", action), body.get("branch"), body.get("commit"), _git_authorized(request))
       if action in ("switch", "reset") and args[0] != action:
         raise ValueError
     lock = request.app[GIT_LOCK_KEY]
@@ -278,13 +300,34 @@ async def git_api(request):
 
 
 async def git_apply(request):
-  return _error(403, "git_mutation_disabled", "authenticated updater integration is unavailable")
+  repo = request.app.get(GIT_KEY)
+  if repo is None or not repo.can_apply(_git_authorized(request)):
+    return _error(403, "git_mutation_disabled", "offroad maintenance requires authorized access and an idle updater")
+  lock = request.app[GIT_LOCK_KEY]
+  if lock.locked():
+    return _error(503, "git_busy", "repository inspection is in progress")
+  try:
+    async with lock:
+      body = await request.json()
+      if (not isinstance(body, dict) or set(body) - {"operation", "branch", "commit", "planDigest"} or
+          not isinstance(body.get("planDigest"), str) or not re.fullmatch(r"[0-9a-f]{64}", body["planDigest"])):
+        raise ValueError
+      result = await asyncio.to_thread(repo.apply, body.get("operation"), body.get("branch"), body.get("commit"), body["planDigest"])
+  except GitPlanChanged:
+    return _error(409, "git_plan_changed", "refresh the preview before applying")
+  except GitApplyBlocked:
+    return _error(403, "git_apply_blocked", "the updater is busy or the working tree is not known and clean")
+  except (ValueError, TypeError):
+    return _error(400, "invalid_git_request", "invalid Git parameters or target")
+  except (OSError, SubprocessError):
+    return _error(503, "git_unavailable", "device repository could not be inspected")
+  return web.json_response(result, status=202)
 
 
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
-               telemetry=None, camera=None, git=None, lan_access=None) -> web.Application:
+               telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
@@ -305,6 +348,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[CAMERA_KEY] = camera
   if git is not None:
     app[GIT_KEY] = git
+  if native_longitudinal is not None:
+    app[NATIVE_LONGITUDINAL] = native_longitudinal
   app.on_shutdown.append(close_sockets)
   app.router.add_get("/v1/health", health)
   app.router.add_get("/v1/kova-params", get_kova_params)

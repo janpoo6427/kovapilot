@@ -51,10 +51,22 @@ function launch {
       echo "${DIR} has been modified, skipping overlay update installation"
     else
       if [ -f "${STAGING_ROOT}/finalized/.overlay_consistent" ]; then
-        if [ ! -d /data/safe_staging/old_openpilot ]; then
+        local link_worktree_ok=true
+        local changes
+        if [ -f "${STAGING_ROOT}/finalized/.kova_link_update" ]; then
+          if ! changes="$(timeout 10s git -C "$DIR" --no-optional-locks --no-pager -c core.fsmonitor=false status --porcelain=v1 --untracked-files=normal --ignore-submodules=none)" ||
+             [ -n "$changes" ]; then
+            link_worktree_ok=false
+          fi
+        fi
+        if [ "$link_worktree_ok" = false ]; then
+          echo "Working tree changed or could not be checked, skipping Link update"
+          rm -f "${STAGING_ROOT}/finalized/.overlay_consistent"
+        elif [ ! -d /data/safe_staging/old_openpilot ]; then
           echo "Valid overlay update found, installing"
           LAUNCHER_LOCATION="${BASH_SOURCE[0]}"
 
+          rm -f "${STAGING_ROOT}/finalized/.kova_link_update"
           mv "$DIR" /data/safe_staging/old_openpilot
           mv "${STAGING_ROOT}/finalized" "$DIR"
           cd "$DIR"
@@ -75,6 +87,13 @@ function launch {
   # handle pythonpath
   ln -sfn "$(pwd)" /data/pythonpath
   export PYTHONPATH="$PWD"
+
+  # Direct installs can still carry Git LFS's external filter in .git/config.
+  if [ -x "$DIR/tools/lfs.sh" ] &&
+     [ "$(git -C "$DIR" config --get filter.lfs.process)" = 'git-lfs filter-process' ] &&
+     ! git -C "$DIR" lfs version >/dev/null 2>&1; then
+    "$DIR/tools/lfs.sh" install || echo "Could not migrate the Git LFS filter"
+  fi
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.

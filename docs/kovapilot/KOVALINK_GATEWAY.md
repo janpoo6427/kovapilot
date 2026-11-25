@@ -28,7 +28,8 @@ pins the certificate for the connection. If discovery is unavailable, use
 Devices on the same private subnet can use the Gateway's allowlisted
 telemetry, camera and settings APIs. Automatic Wi-Fi connections can save
 catalog settings marked writable, including control preferences. Each
-setting follows its save and apply policies. Git apply stays disabled.
+setting follows its save and apply policies. Git maintenance uses the
+authorized updater workflow below.
 Use a network whose members you trust.
 
 Settings with `savePolicy: anytime` accept authorized saves independently of
@@ -42,6 +43,14 @@ Saving never restarts the process.
 longitudinal control. Authorized saves remain in `pendingParked` until the
 running planner confirms the vehicle is stationary in Park with controls
 disengaged. The planner then applies the value without a restart.
+
+The `cruise.openpilot_longitudinal` switch shows the existing
+`AlphaLongitudinalEnabled` preference as 0 or 1 and reports the effective
+`CarParams.openpilotLongitudinalControl` separately. It is writable when
+the current vehicle supports alpha longitudinal and the device sees Park,
+standstill and disengaged controls. Writes include `expectedValue` for the
+last reviewed preference. The next normal vehicle session performs the
+standard capability checks and applies the preference.
 
 ## Optional bearer authentication
 
@@ -131,7 +140,7 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | `GET /v1/git/log?limit=20&cursor=0` | Current HEAD history and next offset |
 | `POST /v1/git/plan` | Validated switch or reset preview |
 | `POST /v1/git/switch`, `POST /v1/git/reset` | Operation-specific preview aliases |
-| `POST /v1/git/apply` | Returns HTTP 403 until authenticated updater integration is available |
+| `POST /v1/git/apply` | Queue a reviewed branch or commit for the offroad updater |
 
 Telemetry frames include `schemaVersion: 1`, `monotonicTimeNanos` and
 `speedMps`. The frame can also include gear, turn signals, brake status,
@@ -150,5 +159,16 @@ If a fetch fails or reaches its deadline, the request returns `git_unavailable`.
 Reset previews also require a full `commit` SHA
 reachable from the selected ref. Plans return the target, current HEAD,
 dirty status, affected file count, restart requirement and a digest.
-`mutationEnabled` remains false. KovaLink should treat these operations as
-previews and keep the apply control disabled.
+`mutationEnabled` indicates whether the offroad updater accepts maintenance
+from this client. It requires bearer authorization over Wi-Fi, or native
+loopback, and an idle updater. Send the preview's operation, branch,
+optional reset commit and `planDigest` to `POST /v1/git/apply`. The server
+rechecks the installed checkout, clean worktree and fetched origin target.
+HTTP 202 returns the queued maintenance request. Status reports queued,
+staged, installed or failed. The updater stages the reviewed commit. The
+prepared update is eligible for installation at the next device restart.
+The status and branch
+APIs avoid changing Git refs while a Link update is queued or staged.
+
+Boot migrates old external Git LFS filter configuration to the included LFS
+client when the external command is missing.

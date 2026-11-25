@@ -18,6 +18,7 @@ from openpilot.common.markdown import parse_markdown
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import AGNOS, HARDWARE
+from openpilot.kovapilot.config.git_update_request import KEY as LINK_GIT_UPDATE, active_request
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -59,8 +60,13 @@ class WaitTimeHelper:
     self.user_request = UserRequest.CHECK
     self.ready_event.set()
 
-  def sleep(self, t: float) -> None:
-    self.ready_event.wait(timeout=t)
+  def sleep(self, t: float, params=None) -> None:
+    deadline = time.monotonic() + t
+    while (remaining := deadline - time.monotonic()) > 0:
+      if self.ready_event.wait(timeout=min(remaining, 5) if params is not None else remaining):
+        return
+      if params is not None and active_request(params) is not None:
+        return
 
 def write_time_to_param(params, param) -> None:
   t = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -172,7 +178,7 @@ def init_overlay() -> None:
   cloudlog.info(f"git diff output:\n{git_diff}")
 
 
-def finalize_update() -> None:
+def finalize_update(*, link_requested=False) -> None:
   """Take the current OverlayFS merged view and finalize a copy outside of
   OverlayFS, ready to be swapped-in at BASEDIR. Copy using shutil.copytree"""
 
@@ -198,6 +204,8 @@ def finalize_update() -> None:
   except subprocess.CalledProcessError:
     cloudlog.exception(f"Failed git cleanup, took {time.monotonic() - t:.3f} s")
 
+  if link_requested:
+    Path(FINALIZED, ".kova_link_update").touch()
   set_consistent_flag(True)
   cloudlog.info("done finalizing overlay")
 
@@ -367,7 +375,7 @@ class Updater:
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
 
-  def fetch_update(self) -> None:
+  def fetch_update(self, link_request=None) -> None:
     cloudlog.info("attempting git fetch inside staging overlay")
 
     self.params.put("UpdaterState", "downloading...", block=True)
@@ -380,15 +388,25 @@ class Updater:
 
     run(["git", "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], OVERLAY_MERGED)
 
-    branch = self.target_branch
+    branch = self.target_branch if link_request is None else link_request["branch"]
     git_fetch_output = run(["git", "fetch", "origin", branch], OVERLAY_MERGED)
     cloudlog.info("git fetch success: %s", git_fetch_output)
+
+    target = "FETCH_HEAD"
+    if link_request is not None:
+      fetched = run(["git", "rev-parse", "FETCH_HEAD"], OVERLAY_MERGED).strip()
+      if fetched != link_request["branchHead"]:
+        raise ValueError("origin target moved")
+      target = link_request["commit"]
+      if link_request["operation"] == "switch" and target != fetched:
+        raise ValueError("invalid branch tip")
+      run(["git", "merge-base", "--is-ancestor", target, fetched], OVERLAY_MERGED)
 
     cloudlog.info("git reset in progress")
     # Check out without running the installed LFS client, the new checkout installs its own below
     nolfs = ["-c", "filter.lfs.process=", "-c", "filter.lfs.required=false", "-c", "core.hooksPath=/dev/null"]
     cmds = [
-      ["git", *nolfs, "checkout", "--force", "--no-recurse-submodules", "-B", branch, "FETCH_HEAD"],
+      ["git", *nolfs, "checkout", "--force", "--no-recurse-submodules", "-B", branch, target],
       ["git", "branch", "--set-upstream-to", f"origin/{branch}"],
       ["git", *nolfs, "reset", "--hard"],
       ["git", "clean", "-xdff"],
@@ -410,8 +428,61 @@ class Updater:
 
     # Create the finalized, ready-to-swap update
     self.params.put("UpdaterState", "finalizing update...", block=True)
-    finalize_update()
+    if link_request is not None and not self.params.get_bool("IsOffroad"):
+      raise ValueError("offroad maintenance ended")
+    finalize_update(link_requested=link_request is not None)
     cloudlog.info("finalize success!")
+
+  def process_link_update(self, job) -> None:
+    def finish(phase, reason=None):
+      if phase == "failed":
+        self.params.put_bool("UpdateAvailable", False, block=True)
+      self.params.put(LINK_GIT_UPDATE, {**job, "phase": phase, **({"reason": reason} if reason else {})}, block=True)
+
+    def checkout(path):
+      branch = self.get_branch(path)
+      return self.get_commit_hash(path), None if branch == "HEAD" else branch
+
+    wanted = job["commit"], job["branch"]
+    previous = job["beforeHead"], job.get("beforeBranch")
+    try:
+      found = checkout(BASEDIR)
+      if found == wanted:
+        finish("installed")
+        return
+      if found != previous:
+        set_consistent_flag(False)
+        finish("failed", "checkoutChanged")
+        return
+      if job["phase"] == "staged":
+        if Path(FINALIZED, ".overlay_consistent").is_file() and checkout(FINALIZED) == wanted:
+          if not self.params.get_bool("UpdateAvailable"):
+            self.params.put_bool("UpdateAvailable", True, block=True)
+          return
+        set_consistent_flag(False)
+        finish("failed", "stagingMissing")
+        return
+      if not self.params.get_bool("IsOffroad"):
+        return
+      changes = run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1",
+                     "--untracked-files=normal", "--ignore-submodules=none"], BASEDIR)
+      if changes:
+        finish("failed", "workingTreeChanged")
+        return
+      run(["git", "check-ref-format", "--branch", job["branch"]], BASEDIR)
+      init_overlay()
+      self.fetch_update(job)
+      if checkout(FINALIZED) != wanted:
+        raise ValueError("staged checkout mismatch")
+      self.params.put("UpdaterTargetBranch", job["branch"], block=True)
+      self.params.put_bool("UpdateAvailable", True, block=True)
+      finish("staged")
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+      set_consistent_flag(False)
+      finish("failed", "stagingFailed")
+    finally:
+      if self.params.get("UpdaterState") != "idle":
+        self.params.put("UpdaterState", "idle", block=True)
 
 
 def main() -> None:
@@ -439,8 +510,8 @@ def main() -> None:
     update_failed_count = 0 # TODO: Load from param?
     wait_helper = WaitTimeHelper()
 
-    # invalidate old finalized update
-    set_consistent_flag(False)
+    if active_request(params) is None:
+      set_consistent_flag(False)
 
     # set initial state
     params.put("UpdaterState", "idle", block=True)
@@ -449,6 +520,12 @@ def main() -> None:
     first_run = True
     while True:
       wait_helper.ready_event.clear()
+
+      if (job := active_request(params)) is not None:
+        if system_time_valid():
+          updater.process_link_update(job)
+        wait_helper.sleep(5)
+        continue
 
       # Attempt an update
       exception = None
@@ -461,7 +538,7 @@ def main() -> None:
 
         if not system_time_valid() or first_run:
           first_run = False
-          wait_helper.sleep(60)
+          wait_helper.sleep(60, params)
           continue
 
         update_failed_count += 1
@@ -505,7 +582,7 @@ def main() -> None:
 
       # infrequent attempts if we successfully updated recently
       wait_helper.user_request = UserRequest.NONE
-      wait_helper.sleep(5*60 if update_failed_count > 0 else 1.5*60*60)
+      wait_helper.sleep(5*60 if update_failed_count > 0 else 1.5*60*60, params)
 
 
 if __name__ == "__main__":

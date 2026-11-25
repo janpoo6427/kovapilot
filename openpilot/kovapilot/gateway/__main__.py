@@ -32,11 +32,13 @@ def main() -> None:
 
   from aiohttp import web
 
+  from openpilot.kovapilot.config.git_update_request import KEY as GIT_UPDATE_KEY
   from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
   from openpilot.kovapilot.gateway.app import create_app
   from openpilot.kovapilot.gateway.camera import CameraSignaling
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
   from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
+  from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability
   from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
   settings_params = Params()
@@ -54,10 +56,18 @@ def main() -> None:
   telemetry = CerealTelemetry()
   app = create_app(
     store, lambda: device_state_params.get_bool("IsOffroad"),
-    parked_provider=telemetry.is_parked, applied_cruise_provider=telemetry.applied_cruise_sync,
+    parked_provider=telemetry.is_parked_and_disengaged, applied_cruise_provider=telemetry.applied_cruise_sync,
     applied_curve_provider=telemetry.applied_curve_slowdown,
     telemetry=telemetry, camera=CameraSignaling(device_state_params),
-    git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState")),
+    native_longitudinal=NativeLongitudinal(device_state_params, partial(vehicle_capability, device_state_params),
+                                           telemetry.is_parked_and_disengaged),
+    git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState"),
+                      maintenance_state=lambda: device_state_params.get(GIT_UPDATE_KEY),
+                      apply_allowed=lambda: (not PC and device_state_params.get_bool("IsOffroad")
+                                             and not device_state_params.get_bool("DisableUpdates")
+                                             and not device_state_params.get_bool("UpdateAvailable")
+                                             and device_state_params.get("UpdaterState") == "idle"),
+                      enqueue=lambda job: device_state_params.put(GIT_UPDATE_KEY, job, block=True)),
     lan_access=lan[0] if lan else None,
   )
   if lan is None:
