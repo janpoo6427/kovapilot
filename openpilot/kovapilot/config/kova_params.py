@@ -67,17 +67,64 @@ def _validate_localized_text(value: Any, locales: set[str], field: str) -> None:
     raise KovaParamsValidationError(f"{field} must contain non-empty text for every locale")
 
 
+def _is_number(value: Any) -> bool:
+  return type(value) in (int, float) and math.isfinite(value)
+
+
+def _enum_contains(options: Any, value: Any) -> bool:
+  # Exact type match: JSON true must not select option 1, and 1.0 must not select 1.
+  return isinstance(options, list) and any(type(option) is type(value) and option == value for option in options)
+
+
 def _validate_value(setting: dict[str, Any], value: Any) -> None:
   setting_type = setting["type"]
   valid = {
     "boolean": type(value) is bool,
     "integer": type(value) is int,
-    "number": type(value) in (int, float) and math.isfinite(value),
+    "number": _is_number(value),
     "string": isinstance(value, str),
-    "enum": value in setting.get("options", []),
+    "enum": _enum_contains(setting.get("options"), value),
   }.get(setting_type, False)
   if not valid:
     raise KovaParamsValidationError(f"invalid value for {setting['key']}: expected {setting_type}")
+  if setting_type in ("integer", "number"):
+    minimum = setting.get("minimum")
+    maximum = setting.get("maximum")
+    if (minimum is not None and value < minimum) or (maximum is not None and value > maximum):
+      raise KovaParamsValidationError(f"value out of range for {setting['key']}: allowed {minimum}..{maximum}")
+
+
+def _validate_constraints(setting: dict[str, Any], locales: set[str]) -> None:
+  key = setting["key"]
+  setting_type = setting.get("type")
+  if setting_type in ("integer", "number"):
+    bound_type_ok = (lambda bound: type(bound) is int) if setting_type == "integer" else _is_number
+    for field in ("minimum", "maximum"):
+      if field in setting and not bound_type_ok(setting[field]):
+        raise KovaParamsValidationError(f"{field} for {key} must be a finite {setting_type}")
+    if "minimum" in setting and "maximum" in setting and setting["minimum"] > setting["maximum"]:
+      raise KovaParamsValidationError(f"minimum for {key} must not exceed maximum")
+    if "step" in setting and (not bound_type_ok(setting["step"]) or setting["step"] <= 0):
+      raise KovaParamsValidationError(f"step for {key} must be a positive {setting_type}")
+    if "unit" in setting:
+      _validate_localized_text(setting["unit"], locales, f"setting {key} unit")
+  elif any(field in setting for field in ("minimum", "maximum", "step", "unit")):
+    raise KovaParamsValidationError(f"numeric constraints are only valid for integer or number settings: {key}")
+
+  if setting_type == "enum":
+    options = setting.get("options")
+    if not isinstance(options, list) or not options or any(type(option) not in (str, int) for option in options):
+      raise KovaParamsValidationError(f"options for {key} must be a non-empty string or integer array")
+    if len({(type(option), option) for option in options}) != len(options):
+      raise KovaParamsValidationError(f"options for {key} must be unique")
+    option_titles = setting.get("optionTitles")
+    if option_titles is not None:
+      if not isinstance(option_titles, dict) or set(option_titles) != {str(option) for option in options}:
+        raise KovaParamsValidationError(f"optionTitles for {key} must title every option")
+      for option, title in option_titles.items():
+        _validate_localized_text(title, locales, f"setting {key} option {option} title")
+  elif "options" in setting or "optionTitles" in setting:
+    raise KovaParamsValidationError(f"options are only valid for enum settings: {key}")
 
 
 def validate_catalog(catalog: Any) -> None:
@@ -117,6 +164,7 @@ def validate_catalog(catalog: Any) -> None:
       raise KovaParamsValidationError(f"invalid availability for {setting['key']}")
     _validate_localized_text(setting.get("title"), locales, f"setting {setting['key']} title")
     _validate_localized_text(setting.get("description"), locales, f"setting {setting['key']} description")
+    _validate_constraints(setting, locales)
     _validate_value(setting, setting.get("defaultValue"))
 
 

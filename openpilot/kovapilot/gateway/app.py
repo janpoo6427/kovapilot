@@ -31,6 +31,15 @@ def _error(status: int, code: str, message: str) -> web.Response:
   return web.json_response({"error": {"code": code, "message": message}}, status=status)
 
 
+def _with_device_state(request: web.Request, document: dict[str, Any], is_offroad: bool | None = None) -> dict[str, Any]:
+  # Read-only device state so KovaLink can lock offroad-only settings before sending.
+  # The update handler still enforces the policy from the device's own IsOffroad.
+  if is_offroad is None:
+    is_offroad = bool(request.app[OFFROAD_PROVIDER_KEY]())
+  document["device"] = {"offroad": is_offroad}
+  return document
+
+
 async def health(request: web.Request) -> web.Response:
   return web.json_response({
     "status": "ok",
@@ -46,7 +55,7 @@ async def get_kova_params(request: web.Request) -> web.Response:
     document = await asyncio.to_thread(store.document)
   except KovaParamsValidationError:
     return _error(503, "kova_params_unavailable", "stored settings failed validation")
-  return web.json_response(document)
+  return web.json_response(_with_device_state(request, document))
 
 
 def _parse_update_payload(payload: Any) -> tuple[str, Any, int]:
@@ -89,7 +98,7 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(403, "update_forbidden", str(exc))
   except KovaParamsValidationError as exc:
     return _error(400, "invalid_value", str(exc))
-  return web.json_response(document)
+  return web.json_response(_with_device_state(request, document, bool(is_offroad)))
 
 
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider) -> web.Application:
