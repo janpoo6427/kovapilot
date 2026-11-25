@@ -24,7 +24,7 @@ def read_camera_profile(path: Path | None) -> int:
   return next(setting["value"] for setting in document["settings"] if setting["key"] == CAMERA_PROFILE_KEY)
 
 
-def observe_replay(events, *, camera_inputs=None, camera_profile: int = 0):
+def observe_replay(events, *, camera_inputs=None, camera_profile: int = 0, geometry_only: bool = False):
   from openpilot.common.constants import CV
   from openpilot.kovapilot.bridges.camera_shadow import CameraShadow
   from openpilot.kovapilot.bridges.longitudinal_shadow import LongitudinalShadow
@@ -32,9 +32,9 @@ def observe_replay(events, *, camera_inputs=None, camera_profile: int = 0):
   from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
   from openpilot.selfdrive.test.process_replay.migration import migrate, migrate_carState
 
-  services = {"carParams", "carState", "carControl", "controlsState", "modelV2"}
+  services = {"carParams", "carState", "carControl", "controlsState", "selfdriveState", "modelV2"}
   inputs = sorted((event for event in events if event.which() in services), key=lambda event: event.logMonoTime)
-  shadow = LongitudinalShadow(V_CRUISE_MAX, V_CRUISE_UNSET, CV.KPH_TO_MS)
+  shadow = LongitudinalShadow(V_CRUISE_MAX, V_CRUISE_UNSET, CV.KPH_TO_MS, geometry_only=geometry_only)
   cameras = CameraShadow(camera_profile) if camera_inputs is not None else None
   navigation = iter(camera_inputs or ())
   pending = next(navigation, None)
@@ -65,6 +65,7 @@ def main() -> None:
   parser.add_argument("rlog", type=Path, help="Local rlog, rlog.zst or rlog.bz2")
   parser.add_argument("--navigation", type=Path, help="Local normalized camera fixture in JSONL")
   parser.add_argument("--kova-params", type=Path, help="KovaParams state JSON (camera profile defaults to 0)")
+  parser.add_argument("--geometry-only", action="store_true", help="Inspect geometry on passive recordings without selecting a curve cap")
   args = parser.parse_args()
   if not args.rlog.is_file():
     parser.error("a local rlog file is required")
@@ -80,7 +81,7 @@ def main() -> None:
 
   observed_frames = 0
   events = LogReader(str(args.rlog.resolve()), only_union_types=True)
-  for observation in observe_replay(events, camera_inputs=camera_inputs, camera_profile=camera_profile):
+  for observation in observe_replay(events, camera_inputs=camera_inputs, camera_profile=camera_profile, geometry_only=args.geometry_only):
     payload = observation if isinstance(observation, dict) else asdict(observation)
     print(json.dumps(payload, allow_nan=False))
     observed_frames += 1
