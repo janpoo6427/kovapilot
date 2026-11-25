@@ -6,6 +6,7 @@ from openpilot.kovapilot.config import cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
   CRUISE_SYNC_SHADOW_KEY,
+  CURVE_SLOWDOWN_KEY,
   KOVA_PARAMS_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsRevisionConflict,
@@ -81,6 +82,7 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
       "steering.always_on": True, "display.onroad_brightness_mode": "auto", "display.onroad_brightness_fixed": 50,
       "navigation.speed_camera_profile": 0,
       CRUISE_SYNC_KEY: False, CRUISE_SYNC_SHADOW_KEY: False,
+      CURVE_SLOWDOWN_KEY: False,
     },
   }
   assert backend.put_calls[0][2] is True

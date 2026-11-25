@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 
 KOVA_PARAMS_KEY = "KovaParams"
+CURVE_SLOWDOWN_KEY = "cruise.curve_slowdown"
 CRUISE_SYNC_KEY = "cruise.accelerator_sync"
 CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
 LEGACY_PARAM_KEYS = {

@@ -1,9 +1,12 @@
 from math import inf, nan
+import json
 from types import SimpleNamespace
 import unittest
 
 from openpilot.kovapilot.bridges.longitudinal_shadow import LongitudinalShadow
+from openpilot.kovapilot.config.kova_params import CURVE_SLOWDOWN_KEY
 from openpilot.kovapilot.longitudinal.curve_slowdown import CurveEstimate, CurveLimiter, estimate_curve
+from openpilot.kovapilot.longitudinal.replay_shadow import read_replay_values
 from openpilot.kovapilot.longitudinal.shadow import MAX_INPUT_AGE_NS, SpeedCandidate, curve_candidate, select_candidate
 
 
@@ -24,6 +27,26 @@ def model(timestamp=10, valid=True, *, turn=True, big=False, lane_change="off"):
 def estimate(curvatures, *, prediction_speed=20.0, accel=0.0, ego=22.0):
   return estimate_curve(TIMES, PATH, [0.0] * len(TIMES), [prediction_speed] * len(TIMES),
                         [prediction_speed * k for k in curvatures], ego_mps=ego, ego_accel_mps2=accel, cruise_mps=27.0)
+
+
+def test_curve_preference_from_saved_settings_controls_replay(tmp_path):
+  config = tmp_path / "settings.json"
+  for saved in ({}, {CURVE_SLOWDOWN_KEY: False}, {CURVE_SLOWDOWN_KEY: True}):
+    config.write_text(json.dumps({"schemaVersion": 1, "revision": 1, "values": saved}))
+    enabled = read_replay_values(config)[CURVE_SLOWDOWN_KEY]
+    assert enabled == saved.get(CURVE_SLOWDOWN_KEY, False)
+    shadow = LongitudinalShadow(145, 255, 1 / 3.6, curve_enabled=enabled)
+    shadow.update(event("carParams", openpilotLongitudinalControl=True, dashcamOnly=False))
+    shadow.update(event("carState", vCruise=100.0, vEgo=22.0, aEgo=0.0, standstill=False, canValid=True,
+                        gasPressed=False, brakePressed=False, buttonEvents=[]))
+    shadow.update(event("carControl", longActive=True, cruiseControl=SimpleNamespace(override=False, cancel=False)))
+    shadow.update(event("controlsState", forceDecel=False))
+    shadow.update(event("selfdriveState", enabled=True))
+    result = shadow.update(model())
+    assert result.selected is enabled
+    assert (result.candidate is not None) is enabled
+    assert result.approach is not None
+    assert result.reason == ("curve_below_cruise" if enabled else "curve_setting_disabled")
 
 
 class TestSpeedCandidate(unittest.TestCase):

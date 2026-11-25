@@ -6,7 +6,7 @@ from aiohttp import ClientSession, TCPConnector, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
-from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore
+from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, CURVE_SLOWDOWN_KEY, KOVA_PARAMS_KEY, KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
 from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
@@ -61,11 +61,16 @@ def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only
         async with client.get("/v1/kova-params") as response:
           settings = {setting["key"]: setting for setting in (await response.json())["settings"]}
           assert settings[CRUISE_SYNC_KEY]["access"] == "readOnly"
+          assert settings[CURVE_SLOWDOWN_KEY]["access"] == "readOnly"
           assert settings["display.onroad_brightness_fixed"]["access"] == "readWrite"
 
         payload = {"key": CRUISE_SYNC_KEY, "value": True, "expectedRevision": 0}
         async with client.post("/v1/kova-params/update", json=payload) as response:
           assert response.status == 403
+        payload.update(key=CURVE_SLOWDOWN_KEY)
+        async with client.post("/v1/kova-params/update", json=payload) as response:
+          assert response.status == 403
+        assert store.values()[CURVE_SLOWDOWN_KEY] is False
         payload.update(key="display.onroad_brightness_fixed", value=65)
         async with client.post("/v1/kova-params/update", json=payload) as response:
           assert response.status == 200
@@ -94,6 +99,24 @@ def test_same_subnet_works_without_a_token_and_control_settings_remain_read_only
       await runner.cleanup()
 
   asyncio.run(check())
+
+
+def test_curve_slowdown_preference_is_saved_and_remains_pending():
+  async def check(client):
+    for revision, value in enumerate((True, False)):
+      payload = {"key": CURVE_SLOWDOWN_KEY, "value": value, "expectedRevision": revision}
+      async with client.post("/v1/kova-params/update", json=payload) as response:
+        assert response.status == 200
+        document = await response.json()
+        assert document["revision"] == revision + 1
+        setting = next(s for s in document["settings"] if s["key"] == CURVE_SLOWDOWN_KEY)
+        assert setting["type"] == "boolean"
+        assert setting["defaultValue"] is False
+        assert setting["value"] is value
+        assert setting["applyStatus"] == "pendingConsumer"
+        assert "appliedValue" not in setting
+
+  asyncio.run(_with_client(check, is_offroad=False))
 
 
 def test_gateway_updates_cruise_config_seen_by_another_store():

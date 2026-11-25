@@ -43,11 +43,13 @@ def _blocked(service, message) -> str | None:
 class LongitudinalShadow:
   """Read recorded plannerd input messages and return diagnostic observations only."""
 
-  def __init__(self, cruise_max_kph: float, cruise_unset_kph: float, kph_to_mps: float, *, geometry_only: bool = False):
+  def __init__(self, cruise_max_kph: float, cruise_unset_kph: float, kph_to_mps: float, *,
+               geometry_only: bool = False, curve_enabled: bool = True):
     self.cruise_max_kph = cruise_max_kph
     self.cruise_unset_kph = cruise_unset_kph
     self.kph_to_mps = kph_to_mps
     self.geometry_only = geometry_only
+    self.curve_enabled = curve_enabled
     self.supported = False
     self.inputs = {}
     self.curve = CurveLimiter()
@@ -116,7 +118,7 @@ class LongitudinalShadow:
       if not lane_change:
         estimate = estimate_curve(model.position.t, model.position.x, model.position.y, model.velocity.x, model.orientationRate.z,
                                   ego_mps=state.vEgo, ego_accel_mps2=state.aEgo, cruise_mps=cruise_mps)
-    cap = None if self.geometry_only else self.curve.update(now_ns, estimate, cruise_mps)
+    cap = self.curve.update(now_ns, estimate, cruise_mps) if self.curve_enabled and not self.geometry_only else None
     candidate = SpeedCandidate("model_curve", cap, now_ns) if cap is not None and cap < cruise_mps else None
     selected = candidate is not None
     if not event.valid:
@@ -127,6 +129,8 @@ class LongitudinalShadow:
       reason = "incomplete_curve_geometry"
     elif self.geometry_only:
       reason = "geometry_only"
+    elif not self.curve_enabled:
+      reason = "curve_setting_disabled"
     else:
       reason = "curve_below_cruise" if selected else "no_curve_candidate"
     return ShadowObservation(now_ns, reason, cruise_mps, candidate, selected, estimate.approach, baseline,
