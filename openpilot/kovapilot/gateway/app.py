@@ -26,7 +26,7 @@ from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 
 API_SCHEMA_VERSION = 1
 MAX_REQUEST_BYTES = 64 * 1024
-LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior"))
+LOCAL_NETWORK_WRITE_RISKS = frozenset(("display", "comfort", "behavior", "control"))
 KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])

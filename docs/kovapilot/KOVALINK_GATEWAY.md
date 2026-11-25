@@ -26,10 +26,10 @@ pins the certificate for the connection. If discovery is unavailable, use
 **IP로 연결** from the phone.
 
 Devices on the same private subnet can use the Gateway's allowlisted
-telemetry, camera and settings APIs. Wi-Fi connections using only network
-access can write display, comfort and behavior settings subject to their
-save policies. Control settings are read-only in this mode. Git
-apply stays disabled. Use a network whose members you trust.
+telemetry, camera and settings APIs. Automatic Wi-Fi connections can save
+catalog settings marked writable, including control preferences. Each
+setting follows its save and apply policies. Git apply stays disabled.
+Use a network whose members you trust.
 
 Settings with `savePolicy: anytime` accept authorized saves independently of
 ignition and gear. Brightness and stock ACC diagnostics are live. Cruise
