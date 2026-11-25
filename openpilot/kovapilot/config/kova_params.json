@@ -21,6 +21,12 @@
         "ko": "comma 장치 화면 표시와 관련된 사용자 설정입니다. 차량 제어에는 영향을 주지 않습니다.",
         "en": "User settings for the comma device screen. They do not affect vehicle control."
       }
+    },
+    {
+      "id": "cruise",
+      "order": 300,
+      "title": {"ko": "크루즈", "en": "Cruise"},
+      "description": {"ko": "크루즈 설정속도 관련 설정입니다.", "en": "Cruise set speed settings."}
     }
   ],
   "settings": [
@@ -81,6 +87,38 @@
       "access": "readWrite",
       "risk": "display",
       "applyPolicy": "immediate",
+      "availability": "available"
+    },
+    {
+      "key": "cruise.accelerator_sync",
+      "groupId": "cruise",
+      "order": 100,
+      "type": "boolean",
+      "defaultValue": false,
+      "title": {"ko": "크루즈 악셀 동기화", "en": "Cruise speed sync on accelerator release"},
+      "description": {
+        "ko": "openpilot이 크루즈 설정속도를 관리할 때, 설정속도를 넘어 가속한 뒤 페달을 놓으면 현재 속도로 설정속도를 올립니다. 가속 페달로 크루즈 해제 설정은 꺼져 있어야 합니다.",
+        "en": "When openpilot manages the cruise set speed, raise it to your current speed if you accelerate above it and release the pedal. Requires Disengage on Accelerator Pedal to be off."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "availability": "available"
+    },
+    {
+      "key": "cruise.accelerator_sync_stock_shadow",
+      "groupId": "cruise",
+      "order": 200,
+      "type": "boolean",
+      "defaultValue": false,
+      "title": {"ko": "순정 ACC 동기화 진단", "en": "Stock ACC sync diagnostics"},
+      "description": {
+        "ko": "순정 ACC에서 페달을 놓을 때 동기화 후보와 차량의 설정속도를 기록합니다.",
+        "en": "Log the candidate sync speed and the vehicle's set speed on accelerator release in stock ACC."
+      },
+      "access": "readWrite",
+      "risk": "behavior",
+      "applyPolicy": "offroad",
       "availability": "available"
     }
   ]

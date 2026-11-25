@@ -3,6 +3,8 @@ from copy import deepcopy
 import pytest
 
 from openpilot.kovapilot.config.kova_params import (
+  CRUISE_SYNC_KEY,
+  CRUISE_SYNC_SHADOW_KEY,
   KOVA_PARAMS_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsRevisionConflict,
@@ -60,7 +62,10 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
   assert backend.value == {
     "schemaVersion": 1,
     "revision": 1,
-    "values": {"steering.always_on": True, "display.onroad_brightness_mode": "auto", "display.onroad_brightness_fixed": 50},
+    "values": {
+      "steering.always_on": True, "display.onroad_brightness_mode": "auto", "display.onroad_brightness_fixed": 50,
+      CRUISE_SYNC_KEY: False, CRUISE_SYNC_SHADOW_KEY: False,
+    },
   }
   assert backend.put_calls[0][2] is True
 

@@ -3,7 +3,8 @@ from copy import deepcopy
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from openpilot.kovapilot.config.kova_params import KOVA_PARAMS_KEY, KovaParamsStore
+from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
+from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, KOVA_PARAMS_KEY, KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
 
 
@@ -25,6 +26,39 @@ async def _with_client(test_case, *, is_offroad=True):
   app = create_app(KovaParamsStore(MemoryBackend()), lambda: is_offroad)
   async with TestClient(TestServer(app)) as client:
     await test_case(client)
+
+
+def test_gateway_updates_cruise_config_seen_by_another_store():
+  backend = MemoryBackend()
+  runtime = KovaParamsStore(backend)
+  gateway = KovaParamsStore(backend)
+  offroad = False
+
+  async def check():
+    nonlocal offroad
+    async with TestClient(TestServer(create_app(gateway, lambda: offroad))) as client:
+      result = await client.get("/v1/kova-params")
+      assert result.status == 200
+      settings = {setting["key"]: setting for setting in (await result.json())["settings"]}
+      assert settings[CRUISE_SYNC_KEY]["value"] is False
+      assert settings[CRUISE_SYNC_SHADOW_KEY]["value"] is False
+
+      payload = {"key": CRUISE_SYNC_KEY, "value": True, "expectedRevision": 0}
+      response = await client.post("/v1/kova-params/update", json=payload)
+      assert response.status == 403
+      assert read_cruise_sync_settings(runtime) == (False, False)
+
+      offroad = True
+      response = await client.post("/v1/kova-params/update", json=payload)
+      assert response.status == 200
+      assert read_cruise_sync_settings(runtime) == (True, False)
+
+      payload = {"key": CRUISE_SYNC_SHADOW_KEY, "value": True, "expectedRevision": 1}
+      response = await client.post("/v1/kova-params/update", json=payload)
+      assert response.status == 200
+      assert read_cruise_sync_settings(runtime) == (True, True)
+
+  asyncio.run(check())
 
 
 def test_health_describes_loopback_security_stage():
