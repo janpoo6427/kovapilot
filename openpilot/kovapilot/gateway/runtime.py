@@ -13,6 +13,7 @@ from openpilot.kovapilot.gateway import DEVICE_PACKAGES
 
 
 DEVICE_IDENTITY = DEVICE_PACKAGES.parent / "identity"
+DEVICE_WHEELS = Path(__file__).with_name("wheels") / "agnos"
 
 
 def runtime_ready(directory: Path = DEVICE_PACKAGES) -> bool:
@@ -84,13 +85,14 @@ def install_runtime(directory: Path = DEVICE_PACKAGES) -> None:
       requirements = staging / "requirements.txt"
       with requirements.open("wb") as exported:
         subprocess.run(
-          ["uv", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
+          ["uv", "--offline", "export", "--frozen", "--only-group", "kovalink-gateway", "--no-emit-project",
            "--format", "requirements-txt"],
           cwd=BASEDIR, stdout=exported, check=True, timeout=15,
         )
       target = staging / "python"
       subprocess.run(
-        ["uv", "pip", "install", "--python", sys.executable, "--target", str(target),
+        ["uv", "--offline", "pip", "install", "--python", sys.executable, "--target", str(target),
+         "--no-index", "--find-links", str(DEVICE_WHEELS),
          "--require-hashes", "--only-binary=:all:", "-r", str(requirements)],
         cwd=BASEDIR, check=True, timeout=120,
       )

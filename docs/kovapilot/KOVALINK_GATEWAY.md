@@ -1,9 +1,10 @@
 # KovaLink Gateway
 
-On comma, manager prepares the Gateway Python packages automatically while
-offroad. The preparation runs in its own process, retries a failed download
-while offroad, and reuses the installed packages on following boots. The
-Gateway starts automatically on comma when its packages are ready.
+On comma, manager installs the bundled Gateway Python packages at boot in a
+separate, low-priority process, including when the vehicle is already onroad.
+The installation uses the checked-in AGNOS wheels and validates them against
+`uv.lock` without network access. Later boots reuse the installed packages.
+The Gateway starts automatically when its packages are ready.
 
 The native loopback endpoint is `http://127.0.0.1:8082`. Wi-Fi access uses
 TLS on the current private IPv4 address of `wlan0`, for clients on that subnet.
@@ -43,9 +44,8 @@ reuse the same registration.
 
 For the initial setup, generate a random token in your password manager with
 64 lowercase hexadecimal characters (32 random bytes). Paste it into the
-hidden prompt. Both preparation paths use the device's `uv` and the
-repository lockfile to install only Gateway packages into
-`/data/kova/gateway/python`.
+hidden prompt. Both preparation paths use the device's `uv` and the bundled
+AGNOS wheels to install only Gateway packages into `/data/kova/gateway/python`.
 
 On the phone, use a KovaLink build with authenticated Wi-Fi support. From
 **장치 연결**, select the discovered device and use the token and public
@@ -83,6 +83,25 @@ the new address.
 KovaLink verifies the provisioned public-key pin before sending the bearer
 token. Finder results identify candidate endpoints. Registration still needs
 the trusted pin and token.
+
+## Refreshing the boot packages
+
+When the Gateway dependency group changes, export its locked requirements.
+Download its CPython 3.12 Linux arm64 wheels into an empty staging directory
+and replace the files under `openpilot/kovapilot/gateway/wheels/agnos` with
+that set. Keep the wheel archives intact so their package metadata and
+licenses stay with the distribution.
+
+```sh
+requirements=$(mktemp)
+wheel_staging=$(mktemp -d)
+uv --offline export --frozen --only-group kovalink-gateway --no-emit-project \
+  --format requirements-txt > "$requirements"
+uv run --no-project --with pip python -m pip download --require-hashes \
+  --only-binary=:all: --implementation cp --python-version 3.12 --abi cp312 \
+  --platform manylinux_2_28_aarch64 --platform manylinux2014_aarch64 \
+  --dest "$wheel_staging" -r "$requirements"
+```
 
 | Endpoint | Contract |
 | --- | --- |

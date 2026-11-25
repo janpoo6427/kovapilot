@@ -65,7 +65,7 @@ def kovalink_gateway(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("KovaLinkGatewayEnabled") if PC else runtime_ready()
 
 def kovalink_gateway_prepare(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return not started and not runtime_ready()
+  return not runtime_ready()
 
 def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started
