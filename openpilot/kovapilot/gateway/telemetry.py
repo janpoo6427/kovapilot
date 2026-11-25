@@ -4,6 +4,7 @@ import math
 import time
 
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
+from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
 
 
 def _points(line):
@@ -70,12 +71,18 @@ class CerealTelemetry:
     return parked_for_settings(self.sm, time.monotonic_ns())
 
   def applied_cruise_sync(self) -> bool | None:
+    return applied_cruise_sync(self._running_pid("card"))
+
+  def applied_curve_slowdown(self) -> bool | str | None:
+    return applied_curve_slowdown(self._running_pid("plannerd"))
+
+  def _running_pid(self, name: str) -> int | None:
     self.sm.update(0)
     service = "managerState"
     age = time.monotonic_ns() - self.sm.logMonoTime[service]
     if not self.sm.valid[service] or not 0 <= age <= 2_000_000_000:
       return None
     for process in self.sm[service].processes:
-      if process.name == "card" and process.running:
-        return applied_cruise_sync(process.pid)
+      if process.name == name and process.running:
+        return process.pid
     return None

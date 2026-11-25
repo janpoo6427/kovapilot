@@ -12,6 +12,7 @@ from aiohttp import ClientError, web
 
 from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
+  CURVE_SLOWDOWN_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsReadOnlyError,
   KovaParamsRevisionConflict,
@@ -30,6 +31,7 @@ KOVA_PARAMS_STORE_KEY = web.AppKey("kova_params_store", KovaParamsStore)
 OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
 APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], bool | None])
+APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], bool | str | None])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
@@ -61,11 +63,24 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
   document["device"] = _device_state(request) if device_state is None else device_state
   allowed = _allowed_write_risks(request)
   applied_cruise = request.app.get(APPLIED_CRUISE_PROVIDER_KEY)
+  applied_curve = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
   for setting in document["settings"]:
     if allowed is not None and setting.get("risk") not in allowed:
       setting["access"] = "readOnly"
+    provider = None
     if setting["key"] == CRUISE_SYNC_KEY and setting.get("savePolicy") == "anytime":
-      applied = applied_cruise() if applied_cruise is not None else None
+      provider = applied_cruise
+      if provider is None:
+        setting["applyState"] = "awaitingStart"
+    elif setting["key"] == CURVE_SLOWDOWN_KEY and applied_curve is not None:
+      provider = applied_curve
+      setting["applyStatus"] = "available"
+    if provider is not None:
+      applied = provider()
+      if applied == "unsupported":
+        setting["applyStatus"] = "unsupported"
+        setting["access"] = "readOnly"
+        continue
       if applied is None:
         setting["applyState"] = "awaitingStart"
       else:
@@ -117,6 +132,9 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(400, "invalid_json", "request body must be valid JSON")
 
   store = request.app[KOVA_PARAMS_STORE_KEY]
+  applied_curve = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
+  if key == CURVE_SLOWDOWN_KEY and applied_curve is not None and applied_curve() == "unsupported":
+    return _error(403, "update_forbidden", "curve slowdown requires openpilot longitudinal control")
   device_state = _device_state(request)
   try:
     document = await asyncio.to_thread(
@@ -260,6 +278,7 @@ async def git_apply(request):
 
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], bool | None] | None = None,
+               applied_curve_provider: Callable[[], bool | str | None] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
@@ -268,6 +287,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[PARKED_PROVIDER_KEY] = parked_provider
   if applied_cruise_provider is not None:
     app[APPLIED_CRUISE_PROVIDER_KEY] = applied_cruise_provider
+  if applied_curve_provider is not None:
+    app[APPLIED_CURVE_PROVIDER_KEY] = applied_curve_provider
   app[SOCKETS_KEY] = set()
   app[LAN_SOCKETS_KEY] = set()
   if lan_access is not None:

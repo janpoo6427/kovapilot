@@ -45,7 +45,8 @@ class LongitudinalPlanner:
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.a_cruise = init_a
-    self.a_camera = None
+    self.a_speed_cap = None
+    self.speed_cap_source = None
     self.output_a_target = init_a
     self.output_should_stop = False
 
@@ -53,7 +54,7 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm, *, camera_speed_cap=None, camera_eligible=False):
+  def update(self, sm, *, camera_speed_cap=None, camera_eligible=False, curve_speed_cap=None, curve_eligible=False):
     v_ego = sm['carState'].vEgo
     personality = sm['selfdriveState'].personality
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
@@ -120,20 +121,30 @@ class LongitudinalPlanner:
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop),
                   (output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e)]
 
-    if camera_eligible and self.CP.openpilotLongitudinalControl and not reset_state and not sm['controlsState'].forceDecel:
-      if camera_speed_cap is not None and isfinite(camera_speed_cap) and 0 < camera_speed_cap < v_cruise:
-        camera_prev = self.a_camera if self.a_camera is not None else a_cruise_prev
-        self.a_camera = get_cruise_accel(camera_speed_cap, v_ego, camera_prev, self.output_a_target, self.dt)
-      elif self.a_camera is not None:
+    if ((camera_eligible or curve_eligible) and self.CP.openpilotLongitudinalControl and not self.CP.dashcamOnly and
+        not reset_state and not sm['controlsState'].forceDecel):
+      caps = {"camera": (camera_speed_cap, camera_eligible), "curve": (curve_speed_cap, curve_eligible)}
+      if self.speed_cap_source is not None and not caps[self.speed_cap_source][1]:
+        self.a_speed_cap = None
+        self.speed_cap_source = None
+      selected = min(((cap, source) for source, (cap, eligible) in caps.items()
+                      if eligible and cap is not None and isfinite(cap) and 0 < cap < v_cruise), default=None)
+      if selected is not None:
+        cap, self.speed_cap_source = selected
+        cap_prev = self.a_speed_cap if self.a_speed_cap is not None else a_cruise_prev
+        self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt)
+      elif self.a_speed_cap is not None:
         # An expired cap is released at the existing positive cruise jerk limit.
         step = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS) * self.dt
-        self.a_camera = min(self.a_camera + step, self.a_cruise)
-        if self.a_camera >= self.a_cruise:
-          self.a_camera = None
-      if self.a_camera is not None:
-        candidates.append((self.a_camera, LongitudinalPlanSource.cruise, False))
+        self.a_speed_cap = min(self.a_speed_cap + step, self.a_cruise)
+        if self.a_speed_cap >= self.a_cruise:
+          self.a_speed_cap = None
+          self.speed_cap_source = None
+      if self.a_speed_cap is not None:
+        candidates.append((self.a_speed_cap, LongitudinalPlanSource.cruise, False))
     else:
-      self.a_camera = None
+      self.a_speed_cap = None
+      self.speed_cap_source = None
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)

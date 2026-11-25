@@ -1,4 +1,4 @@
-"""Distance-based vision curve limits for offline evaluation."""
+"""Distance-based vision curve limits."""
 
 from collections import deque
 from collections.abc import Sequence
@@ -10,7 +10,6 @@ from openpilot.kovapilot.longitudinal.shadow import CURVE_LOOKAHEAD_S, MAX_INPUT
 from openpilot.kovapilot.navigation.camera_profile import SpeedRamp, speed_ramp
 
 
-# Offline comparison values. Vehicle calibration is a separate step.
 PREVIEW_DISTANCE_M = 180.0
 MAX_PATH_SPEED_MPS = 85.0
 MIN_MOVING_SPEED_MPS = 3.0
@@ -21,6 +20,17 @@ RESPONSE_S = 0.5
 RECOVERY_ACCEL_MPS2 = 0.5
 HOLD_NS = 350_000_000
 CONFIRM_NS = 100_000_000
+
+
+@dataclass(frozen=True)
+class CurveLimits:
+  decel_mps2: float = DECEL_MPS2
+  jerk_mps3: float = JERK_MPS3
+  response_s: float = RESPONSE_S
+  min_turn_speed_mps: float = 0.0
+
+
+OFFLINE_CURVE_LIMITS = CurveLimits()
 
 
 @dataclass(frozen=True)
@@ -37,24 +47,33 @@ class CurveEstimate:
   complete: bool
 
 
-def _braking_distance(start_mps: float, target_mps: float, positive_accel: float) -> float:
+def lane_change_active(model) -> bool:
+  return str(model.meta.laneChangeState) in ("laneChangeStarting", "laneChangeFinishing")
+
+
+def estimate_model_curve(model, state, cruise_mps: float, limits: CurveLimits = OFFLINE_CURVE_LIMITS) -> CurveEstimate:
+  return estimate_curve(model.position.t, model.position.x, model.position.y, model.velocity.x, model.orientationRate.z,
+                        ego_mps=state.vEgo, ego_accel_mps2=state.aEgo, cruise_mps=cruise_mps, limits=limits)
+
+
+def _braking_distance(start_mps: float, target_mps: float, positive_accel: float, limits: CurveLimits) -> float:
   # Reserve distance for response and to bring existing positive acceleration to zero.
-  unwind_s = positive_accel / JERK_MPS3
-  response_speed = start_mps + positive_accel * RESPONSE_S
+  unwind_s = positive_accel / limits.jerk_mps3
+  response_speed = start_mps + positive_accel * limits.response_s
   brake_speed = response_speed + positive_accel * unwind_s / 2
-  reserve = (start_mps * RESPONSE_S + positive_accel * RESPONSE_S**2 / 2 +
+  reserve = (start_mps * limits.response_s + positive_accel * limits.response_s**2 / 2 +
              response_speed * unwind_s + positive_accel * unwind_s**2 / 3)
-  ramp = speed_ramp(brake_speed, target_mps, DECEL_MPS2, max_jerk_mps3=JERK_MPS3)
+  ramp = speed_ramp(brake_speed, target_mps, limits.decel_mps2, max_jerk_mps3=limits.jerk_mps3)
   return reserve + ramp.distance_m
 
 
-def _approach_speed(distance: float, target: float, cruise: float, accel: float) -> float:
-  if _braking_distance(cruise, target, accel) <= distance:
+def _approach_speed(distance: float, target: float, cruise: float, accel: float, limits: CurveLimits) -> float:
+  if _braking_distance(cruise, target, accel, limits) <= distance:
     return cruise
   low, high = target, cruise
   for _ in range(18):
     mid = (low + high) / 2
-    if _braking_distance(mid, target, accel) <= distance:
+    if _braking_distance(mid, target, accel, limits) <= distance:
       low = mid
     else:
       high = mid
@@ -63,7 +82,7 @@ def _approach_speed(distance: float, target: float, cruise: float, accel: float)
 
 def estimate_curve(times_s: Sequence[float], x_m: Sequence[float], y_m: Sequence[float],
                    model_speeds_mps: Sequence[float], yaw_radps: Sequence[float], *,
-                   ego_mps: float, ego_accel_mps2: float, cruise_mps: float) -> CurveEstimate:
+                   ego_mps: float, ego_accel_mps2: float, cruise_mps: float, limits: CurveLimits = OFFLINE_CURVE_LIMITS) -> CurveEstimate:
   if (len({len(times_s), len(x_m), len(y_m), len(model_speeds_mps), len(yaw_radps)}) != 1 or
       not all(map(isfinite, (ego_mps, ego_accel_mps2, cruise_mps))) or ego_mps < MIN_MOVING_SPEED_MPS or cruise_mps <= 0):
     return CurveEstimate(None, False)
@@ -105,13 +124,15 @@ def estimate_curve(times_s: Sequence[float], x_m: Sequence[float], y_m: Sequence
     curvature = abs(median((a, b, c)))
     if curvature <= LATERAL_ACCEL_MPS2 / cruise_mps**2:
       continue
-    turn_speed = sqrt(LATERAL_ACCEL_MPS2 / curvature)
+    turn_speed = max(sqrt(LATERAL_ACCEL_MPS2 / curvature), limits.min_turn_speed_mps)
+    if turn_speed >= cruise_mps:
+      continue
     # The middle point locates the supported curvature; the first point only
     # confirms it. This avoids moving a constraint to one isolated early sample.
     at_distance = distances[i + 1]
-    cap = _approach_speed(at_distance, turn_speed, cruise_mps, positive_accel)
+    cap = _approach_speed(at_distance, turn_speed, cruise_mps, positive_accel, limits)
     if approach is None or cap < approach.approach_speed_mps:
-      feasible = ego_mps <= turn_speed or _braking_distance(ego_mps, turn_speed, positive_accel) <= at_distance
+      feasible = ego_mps <= turn_speed or _braking_distance(ego_mps, turn_speed, positive_accel, limits) <= at_distance
       approach = CurveApproach(at_distance, turn_speed, cap, feasible)
 
   return CurveEstimate(approach, complete and supported and all(c is not None for c in curvatures))
@@ -120,7 +141,8 @@ def estimate_curve(times_s: Sequence[float], x_m: Sequence[float], y_m: Sequence
 class CurveLimiter:
   """Track a curve ceiling and confirm relief using new, complete geometry."""
 
-  def __init__(self):
+  def __init__(self, *, jerk_mps3: float = JERK_MPS3):
+    self.jerk_mps3 = jerk_mps3
     self.cap_mps: float | None = None
     self.last_frame_ns: int | None = None
     self.last_geometry_ns: int | None = None
@@ -170,6 +192,6 @@ class CurveLimiter:
       return
     if (self.recovery is None or self.recovery.target_mps > target_mps or
         self.cap_mps >= self.recovery.target_mps):
-      self.recovery = speed_ramp(self.cap_mps, target_mps, RECOVERY_ACCEL_MPS2, max_jerk_mps3=JERK_MPS3)
+      self.recovery = speed_ramp(self.cap_mps, target_mps, RECOVERY_ACCEL_MPS2, max_jerk_mps3=self.jerk_mps3)
       self.recovery_started_ns = now_ns
     _, self.cap_mps = self.recovery.sample((now_ns - self.recovery_started_ns) / 1e9)

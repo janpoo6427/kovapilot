@@ -13,7 +13,7 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 class Inputs(dict):
   healthy = True
 
-  def all_checks(self, services):
+  def all_checks(self, services=None):
     return self.healthy
 
 
@@ -113,12 +113,12 @@ class TestCameraPlanner(unittest.TestCase):
     enabled.update(inputs, camera_speed_cap=15.0, camera_eligible=True)
     self.assertLess(enabled.output_a_target, baseline.output_a_target)
     self.assertEqual(enabled.output_should_stop, baseline.output_should_stop)
-    camera_accel = enabled.a_camera
+    camera_accel = enabled.a_speed_cap
     enabled.update(inputs, camera_eligible=True)
-    self.assertGreater(enabled.a_camera, camera_accel)
-    self.assertLess(enabled.a_camera - camera_accel, 0.1)
+    self.assertGreater(enabled.a_speed_cap, camera_accel)
+    self.assertLess(enabled.a_speed_cap - camera_accel, 0.1)
     enabled.update(inputs)
-    self.assertIsNone(enabled.a_camera)
+    self.assertIsNone(enabled.a_speed_cap)
 
   def test_camera_cannot_override_force_decel_or_stock_acc(self):
     for openpilot_long, force_decel in ((False, False), (True, True)):
@@ -130,4 +130,4 @@ class TestCameraPlanner(unittest.TestCase):
         baseline.update(inputs)
         enabled.update(inputs, camera_speed_cap=15.0, camera_eligible=True)
         self.assertEqual(baseline.output_a_target, enabled.output_a_target)
-        self.assertIsNone(enabled.a_camera)
+        self.assertIsNone(enabled.a_speed_cap)

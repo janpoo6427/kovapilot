@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from openpilot.kovapilot.longitudinal.curve_slowdown import CurveApproach, CurveEstimate, CurveLimiter, estimate_curve
+from openpilot.kovapilot.longitudinal.curve_slowdown import (CurveApproach, CurveEstimate, CurveLimiter, estimate_model_curve,
+                                                           lane_change_active)
 from openpilot.kovapilot.longitudinal.shadow import SpeedCandidate, curve_candidate, is_fresh
 
 
@@ -114,10 +115,9 @@ class LongitudinalShadow:
     lane_change = False
     if event.valid:
       baseline = curve_candidate(now_ns, model.position.t, model.velocity.x, model.orientationRate.z)
-      lane_change = str(model.meta.laneChangeState) in ("laneChangeStarting", "laneChangeFinishing")
+      lane_change = lane_change_active(model)
       if not lane_change:
-        estimate = estimate_curve(model.position.t, model.position.x, model.position.y, model.velocity.x, model.orientationRate.z,
-                                  ego_mps=state.vEgo, ego_accel_mps2=state.aEgo, cruise_mps=cruise_mps)
+        estimate = estimate_model_curve(model, state, cruise_mps)
     cap = self.curve.update(now_ns, estimate, cruise_mps) if self.curve_enabled and not self.geometry_only else None
     candidate = SpeedCandidate("model_curve", cap, now_ns) if cap is not None and cap < cruise_mps else None
     selected = candidate is not None

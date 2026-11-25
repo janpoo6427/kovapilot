@@ -156,6 +156,41 @@ def test_gateway_updates_cruise_config_seen_by_another_store():
   asyncio.run(check())
 
 
+def test_curve_slowdown_reports_planner_application_and_unsupported_vehicle():
+  store = KovaParamsStore(MemoryBackend())
+  applied = None
+
+  async def check():
+    nonlocal applied
+    app = create_app(store, lambda: False, applied_curve_provider=lambda: applied)
+    async with TestClient(TestServer(app)) as client:
+      async def setting(response):
+        assert response.status == 200
+        return next(s for s in (await response.json())["settings"] if s["key"] == CURVE_SLOWDOWN_KEY)
+
+      payload = {"key": CURVE_SLOWDOWN_KEY, "value": True, "expectedRevision": 0}
+      pending = await setting(await client.get("/v1/kova-params"))
+      assert pending["applyState"] == "awaitingStart"
+      applied = False
+      saved = await setting(await client.post("/v1/kova-params/update", json=payload))
+      assert saved["applyState"] == "pendingRestart"
+      assert saved["value"] is True and saved["appliedValue"] is False
+      applied = True
+      active = await setting(await client.get("/v1/kova-params"))
+      assert active["applyState"] == "applied"
+      applied = "unsupported"
+      unsupported = await setting(await client.get("/v1/kova-params"))
+      assert unsupported["applyStatus"] == "unsupported"
+      assert unsupported["access"] == "readOnly"
+      assert "appliedValue" not in unsupported
+      payload.update(value=False, expectedRevision=1)
+      response = await client.post("/v1/kova-params/update", json=payload)
+      assert response.status == 403
+      assert store.values()[CURVE_SLOWDOWN_KEY] is True
+
+  asyncio.run(check())
+
+
 def test_health_describes_loopback_security_stage():
   async def test_case(client):
     response = await client.get("/v1/health")
