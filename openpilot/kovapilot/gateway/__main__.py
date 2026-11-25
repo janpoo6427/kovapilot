@@ -2,20 +2,15 @@
 
 import argparse
 import asyncio
+import sys
 from pathlib import Path
 
-from aiohttp import web
-
 from openpilot.common.basedir import BASEDIR
+from openpilot.common.hardware import PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
-from openpilot.kovapilot.gateway.app import create_app
-from openpilot.kovapilot.gateway.camera import CameraSignaling
-from openpilot.kovapilot.gateway.git_maintenance import GitRepository
-from openpilot.kovapilot.gateway.lan import load_lan_config, serve_lan
-from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
+from openpilot.kovapilot.gateway import DEVICE_PACKAGES
 
 
 LOOPBACK_HOST = "127.0.0.1"
@@ -28,6 +23,18 @@ def main() -> None:
   args = parser.parse_args()
   if not 1 <= args.port <= 65535:
     parser.error("port must be between 1 and 65535")
+
+  if not PC and DEVICE_PACKAGES.is_dir():
+    sys.path.insert(0, str(DEVICE_PACKAGES))
+
+  from aiohttp import web
+
+  from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
+  from openpilot.kovapilot.gateway.app import create_app
+  from openpilot.kovapilot.gateway.camera import CameraSignaling
+  from openpilot.kovapilot.gateway.git_maintenance import GitRepository
+  from openpilot.kovapilot.gateway.lan import load_lan_config, serve_lan
+  from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
   settings_params = Params()
   device_state_params = Params()

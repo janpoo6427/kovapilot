@@ -7,9 +7,31 @@ The listener follows Wi-Fi address changes and closes old WebSockets.
 
 ## Wi-Fi connection
 
-On a comma device, provision these files under `/persist/kova/gateway`, then
-start or restart the Gateway. Missing or invalid provisioning leaves it in
-loopback mode.
+On a comma running this branch, switch the vehicle off and open an interactive
+terminal as the regular device user. From `/data/openpilot`, run the setup:
+
+```sh
+sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /persist/kova /data/kova/gateway
+PYTHONPATH="$PWD" python3 tools/kovapilot/kovalink_gateway_setup.py
+```
+
+For the initial setup, generate a random token in your password manager with
+64 lowercase hexadecimal characters (32 random bytes). Paste it into the
+hidden prompt. The tool uses the device's `uv` and the repository lockfile to
+install only Gateway packages into `/data/kova/gateway/python`. It validates
+the TLS configuration before enabling the existing manager flag. If the
+Gateway was already enabled and failed to start before setup, the flag and
+packages take effect on the next normal boot.
+
+On the phone, use a KovaLink build with authenticated Wi-Fi support. Open
+**연결 → 콤마 등록**, enter the current device IP, and use the token and the
+public certificate pin from setup. The phone needs a network route to the
+device's private Wi-Fi address. Entering the IP directly also works when local
+discovery is unavailable.
+
+The tool generates these files under `/persist/kova/gateway` on first setup.
+Administrators can provision the same files manually. Missing or invalid
+configuration leaves the running Gateway in loopback mode.
 
 - `server.pem` contains the device TLS certificate and any certificate chain.
 - `server.key` contains the matching private key.
@@ -31,9 +53,9 @@ explicitly provisioned device identity pin if the client supports it. After an
 IP change, a client using standard IP SAN validation needs a certificate for
 the new address.
 
-This server release uses manual provisioning. KovaLink still needs client-side
-TLS trust, credential storage and an Authorization header for all Gateway
-transports. Finder discovery and in-app pairing are separate work.
+KovaLink verifies the provisioned public-key pin before sending the bearer
+token. Finder results identify candidate endpoints. Registration still needs
+the trusted pin and token.
 
 | Endpoint | Contract |
 | --- | --- |

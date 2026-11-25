@@ -92,6 +92,9 @@ Homepage = "https://github.com/commaai/openpilot"
 standalone = [
   "openpilot[submodules]",
 ]
+kovalink-gateway = [
+  "aiohttp>=3.12,<4",
+]
 
 [build-system]
 requires = ["hatchling"]

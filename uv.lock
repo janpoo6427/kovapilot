@@ -774,6 +774,9 @@ tools = [
 ]
 
 [package.dev-dependencies]
+kovalink-gateway = [
+    { name = "aiohttp" },
+]
 standalone = [
     { name = "openpilot", extra = ["submodules"] },
 ]
@@ -821,6 +824,7 @@ requires-dist = [
 provides-extras = ["testing", "tools", "submodules"]
 
 [package.metadata.requires-dev]
+kovalink-gateway = [{ name = "aiohttp", specifier = ">=3.12,<4" }]
 standalone = [{ name = "openpilot", extras = ["submodules"] }]
 
 [[package]]
