@@ -19,7 +19,7 @@ from openpilot.kovapilot.config.kova_params import (
   KovaParamsValidationError,
 )
 from openpilot.kovapilot.gateway.camera import camera_offer
-from openpilot.kovapilot.gateway.git_maintenance import GitRepository
+from openpilot.kovapilot.gateway.git_maintenance import GitFetchError, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 
 
@@ -250,6 +250,8 @@ async def git_api(request):
     return web.json_response({"branches": result} if action == "branches" else result)
   except (ValueError, TypeError):
     return _error(400, "invalid_git_request", "invalid Git parameters or target")
+  except GitFetchError:
+    return _error(503, "git_unavailable", "device could not fetch the latest origin branches")
   except (OSError, SubprocessError):
     return _error(503, "git_unavailable", "device repository could not be inspected")
 

@@ -17,7 +17,7 @@ def test_kovalink_transports(tmp_path):
   git("init", "-q", "-b", "main")
   git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture")
   head = git("rev-parse", "HEAD")
-  git("update-ref", "refs/remotes/origin/main", head)
+  git("remote", "add", "origin", ".")
   repo = GitRepository(tmp_path)
 
   async def run():
@@ -56,7 +56,9 @@ def test_git_status_and_preview_return_commits_when_worktree_scan_times_out(tmp_
   target = "2" * 40
 
   class SlowStatusRepository(GitRepository):
-    def run(self, *args, check=True):
+    def run(self, *args, **kwargs):
+      if args[0] == "fetch":
+        return ""
       if args[0] == "status":
         raise subprocess.TimeoutExpired(args, 3)
       if args[0] == "symbolic-ref":
@@ -87,6 +89,60 @@ def test_git_status_and_preview_return_commits_when_worktree_scan_times_out(tmp_
       assert plan["dirtyKnown"] is False and plan["dirty"] is True
       assert plan["mutationEnabled"] is False
       assert (await client.post("/v1/git/apply", json={})).status == 403
+
+  asyncio.run(run())
+
+
+def test_gateway_fetches_current_branch_tips_without_changing_checkout(tmp_path):
+  remote = tmp_path / "remote"
+  remote.mkdir()
+  local = tmp_path / "device"
+
+  def git(path, *args):
+    return subprocess.check_output(["git", *args], cwd=path, text=True).strip()
+
+  def commit(name):
+    git(remote, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", name)
+    return git(remote, "rev-parse", "HEAD")
+
+  git(remote, "init", "-q", "-b", "main")
+  installed = commit("installed")
+  git(tmp_path, "clone", "-q", "--single-branch", str(remote), str(local))
+  git(local, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/unrelated/*")
+  git(remote, "switch", "-qc", "next")
+  listed = commit("latest when listing")
+  fetch_head = local / ".git" / "FETCH_HEAD"
+  fetch_head.write_text("existing updater marker")
+
+  async def run():
+    app = create_app(KovaParamsStore(None), lambda: True, git=GitRepository(local))
+    async with TestClient(TestServer(app)) as client:
+      response = await client.get("/v1/git/branches")
+      assert response.status == 200
+      branches = {branch["name"]: branch["commit"] for branch in (await response.json())["branches"]}
+      assert branches == {"main": installed, "next": listed}
+
+      newer = commit("latest while preview opens")
+      response = await client.post("/v1/git/plan", json={"operation": "switch", "branch": "next"})
+      assert response.status == 200
+      plan = await response.json()
+      assert plan["commit"] == newer and plan["beforeHead"] == installed
+      assert git(local, "rev-parse", "HEAD") == installed
+      assert git(local, "status", "--porcelain") == ""
+      assert fetch_head.read_text() == "existing updater marker"
+      assert git(local, "for-each-ref", "refs/remotes/unrelated/") == ""
+
+      git(remote, "switch", "-q", "main")
+      git(remote, "branch", "-D", "next")
+      response = await client.get("/v1/git/branches")
+      assert response.status == 200
+      assert (await response.json())["branches"] == [{"name": "main", "commit": installed}]
+
+      git(local, "remote", "set-url", "origin", str(tmp_path / "missing"))
+      for response in (await client.get("/v1/git/branches"),
+                       await client.post("/v1/git/plan", json={"operation": "switch", "branch": "next"})):
+        assert response.status == 503
+        assert (await response.json())["error"]["code"] == "git_unavailable"
 
   asyncio.run(run())
 
