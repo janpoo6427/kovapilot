@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from opendbc.car.structs import car
+import pytest
 
 from openpilot.cereal import log
 from openpilot.kovapilot.bridges.driver_monitoring import disabled_state_packet, monitoring_is_disabled
 from openpilot.kovapilot.config.driver_monitoring import (DRIVER_MONITORING_CONFIG, DriverMonitoringDisableReason,
                                                           disable_reason)
+from openpilot.kovapilot.config.parked_setting import stopped_in_park
 from openpilot.kovapilot.engagement.dm_session_disable import (DriverMonitoringSessionGesture,
                                                                SessionDisableContext)
 from openpilot.system.manager.process_config import driver_monitoring_model, driverview
@@ -36,13 +38,14 @@ class DriverMonitoringSubMaster:
     return self.state
 
 
-def context(timestamp: float, *, enabled=False, valid=True, reason=DriverMonitoringDisableReason.NONE):
+def context(timestamp: float, *, enabled=False, valid=True, parked=True, reason=DriverMonitoringDisableReason.NONE):
   return SessionDisableContext(
     now=timestamp + 0.05,
     event_time=timestamp,
     can_valid=True,
     selfdrive_valid=valid,
     selfdrive_enabled=enabled,
+    parked=parked,
     dm_lockout=False,
     dm_alert_three=False,
     disable_reason=reason,
@@ -55,7 +58,7 @@ def press(gesture: DriverMonitoringSessionGesture, timestamp: float, **kwargs) -
   return triggered
 
 
-def test_disengaged_three_press_flow_stops_only_model_and_publishes_neutral_state():
+def test_parked_disengaged_three_press_flow_stops_only_model_and_publishes_neutral_state():
   params = MemoryParams()
   gesture = DriverMonitoringSessionGesture(DRIVER_MONITORING_CONFIG)
   CP = car.CarParams.new_message()
@@ -81,12 +84,31 @@ def test_disengaged_three_press_flow_stops_only_model_and_publishes_neutral_stat
   assert monitoring_is_disabled(DriverMonitoringSubMaster(state))
 
 
-def test_engaged_or_invalid_selfdrive_never_disables_session():
-  for kwargs in ({"enabled": True}, {"valid": False}):
-    gesture = DriverMonitoringSessionGesture(DRIVER_MONITORING_CONFIG)
-    assert not press(gesture, 10.0, **kwargs)
-    assert not press(gesture, 11.0, **kwargs)
-    assert not press(gesture, 12.0, **kwargs)
+@pytest.mark.parametrize("kwargs", [{"enabled": True}, {"valid": False}, {"parked": False}])
+def test_ineligible_state_never_disables_session_and_resets_partial_sequence(kwargs):
+  gesture = DriverMonitoringSessionGesture(DRIVER_MONITORING_CONFIG)
+  assert not press(gesture, 10.0)
+  assert not press(gesture, 10.5)
+  assert not gesture.update(context(11.0, **kwargs), [])
+  assert not press(gesture, 11.5)
+  assert not press(gesture, 12.0)
+  assert press(gesture, 12.5)
+  for t in (13.0, 13.5, 14.0):
+    assert not press(gesture, t, **kwargs)
+
+
+@pytest.mark.parametrize(("gear", "standstill", "speed", "can_valid", "expected"), [
+  ("park", True, 0.0, True, True),
+  ("neutral", True, 0.0, True, False),
+  ("drive", True, 0.0, True, False),
+  ("unknown", True, 0.0, True, False),
+  ("park", False, 0.0, True, False),
+  ("park", True, 0.2, True, False),
+  ("park", True, 0.0, False, False),
+])
+def test_park_requires_valid_gear_and_standstill(gear, standstill, speed, can_valid, expected):
+  state = car.CarState(gearShifter=gear, standstill=standstill, vEgo=speed, canValid=can_valid)
+  assert stopped_in_park(state) is expected
 
 
 def test_lockout_alert_and_existing_disable_reset_partial_sequence():

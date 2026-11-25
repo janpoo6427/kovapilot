@@ -31,6 +31,9 @@ def main() -> int:
     if event.get("kind") == "ready":
       print("shadow_ready read_only_subscribers=true", flush=True)
       continue
+    if event.get("kind") == "reset":
+      gesture.reset()
+      continue
     if event.get("kind") != "car_state":
       continue
 
@@ -42,6 +45,7 @@ def main() -> int:
       can_valid=bool(event.get("packet_valid") and event.get("can_valid")),
       selfdrive_valid=bool(event.get("selfdrive_valid")),
       selfdrive_enabled=bool(event.get("selfdrive_enabled")),
+      parked=event.get("parked") is True,
       dm_lockout=not bool(event.get("dm_valid")) or bool(event.get("dm_lockout")),
       dm_alert_three=bool(event.get("dm_alert_three")),
       disable_reason=DriverMonitoringDisableReason.NONE,

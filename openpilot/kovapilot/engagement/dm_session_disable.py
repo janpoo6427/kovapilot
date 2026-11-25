@@ -11,6 +11,7 @@ class SessionDisableContext:
   can_valid: bool
   selfdrive_valid: bool
   selfdrive_enabled: bool
+  parked: bool
   dm_lockout: bool
   dm_alert_three: bool
   disable_reason: DriverMonitoringDisableReason
@@ -36,6 +37,9 @@ class DriverMonitoringSessionGesture:
   def allowed(self, context: SessionDisableContext) -> bool:
     return (context.disable_reason == DriverMonitoringDisableReason.NONE and
             self.config.allow_session_disable_gesture and
+            context.parked and
+            context.selfdrive_valid and
+            not context.selfdrive_enabled and
             not context.dm_lockout and
             not context.dm_alert_three)
 
@@ -50,11 +54,4 @@ class DriverMonitoringSessionGesture:
       self.reset()
       return False
 
-    if not self.sequence.update(context.event_time, buttons):
-      return False
-
-    if context.selfdrive_valid and not context.selfdrive_enabled:
-      return True
-
-    self.reset()
-    return False
+    return self.sequence.update(context.event_time, buttons)

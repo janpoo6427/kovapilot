@@ -7,6 +7,7 @@ from openpilot.common.realtime import DT_DMON, Ratekeeper, config_realtime_proce
 from openpilot.kovapilot.bridges.driver_monitoring import disabled_state_packet, set_disable_reason
 from openpilot.kovapilot.config.driver_monitoring import (DRIVER_MONITORING_CONFIG, SESSION_DISABLED_PARAM,
                                                           DriverMonitoringDisableReason, disable_reason)
+from openpilot.kovapilot.config.parked_setting import parked_for_settings, stopped_in_park
 from openpilot.kovapilot.engagement.dm_session_disable import (DriverMonitoringSessionGesture,
                                                                SessionDisableContext)
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring
@@ -30,24 +31,29 @@ def dmonitoringd_thread():
   # Keep publishing at 20 Hz even when dmonitoringmodeld is intentionally stopped.
   while True:
     sm.update(0)
-    now = time.monotonic()
+    now_ns = time.monotonic_ns()
+    now = now_ns / 1e9
 
     for packet in messaging.drain_sock(car_control_sock, wait_for_one=False):
       if packet.valid and packet.carControl.cruiseControl.cancel:
         session_gesture.record_cancel_request(packet.logMonoTime / 1e9)
 
     dm_state = DM.get_state_packet(valid=True).driverMonitoringState
+    selfdrive_fresh = (sm.all_checks(['selfdriveState']) and
+                       0 <= now - sm.logMonoTime['selfdriveState'] / 1e9 < DRIVER_MONITORING_CONFIG.input_freshness_seconds)
+    parked_now = parked_for_settings(sm, now_ns)
+    if not (parked_now and selfdrive_fresh):
+      session_gesture.reset()
     for packet in messaging.drain_sock(car_state_sock, wait_for_one=False):
       event_time = packet.logMonoTime / 1e9
       buttons = [(str(button.type), button.pressed) for button in packet.carState.buttonEvents]
-      selfdrive_fresh = (sm.all_checks(['selfdriveState']) and
-                         0 <= now - sm.logMonoTime['selfdriveState'] / 1e9 < DRIVER_MONITORING_CONFIG.input_freshness_seconds)
       context = SessionDisableContext(
         now=now,
         event_time=event_time,
         can_valid=packet.valid and packet.carState.canValid,
         selfdrive_valid=selfdrive_fresh,
         selfdrive_enabled=sm['selfdriveState'].enabled,
+        parked=parked_now and stopped_in_park(packet.carState),
         dm_lockout=dm_state.lockout,
         dm_alert_three=str(dm_state.alertLevel) == 'three',
         disable_reason=reason,
