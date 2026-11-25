@@ -48,7 +48,13 @@
         "risk": {"enum": ["display", "behavior", "control"]},
         "applyPolicy": {"enum": ["immediate", "offroad", "restart"]},
         "availability": {"enum": ["available", "pendingConsumer", "unsupported"]},
-        "requiredCapabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "requiredCapabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "minimum": {"type": "number", "description": "integer/number only: inclusive lower bound"},
+        "maximum": {"type": "number", "description": "integer/number only: inclusive upper bound"},
+        "step": {"type": "number", "exclusiveMinimum": 0, "description": "integer/number only: UI step"},
+        "unit": {"$ref": "#/$defs/localizedText", "description": "integer/number only: localized unit label"},
+        "options": {"type": "array", "minItems": 1, "items": {"type": ["string", "integer"]}, "description": "enum only: allowed values, matched with exact JSON type"},
+        "optionTitles": {"type": "object", "additionalProperties": {"$ref": "#/$defs/localizedText"}, "description": "enum only: localized title for every option, keyed by the option value as text"}
       },
       "additionalProperties": true
     }

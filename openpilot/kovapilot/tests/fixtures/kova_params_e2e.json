@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "defaultLocale": "ko",
+  "locales": ["ko", "en"],
+  "groups": [
+    {
+      "id": "steering",
+      "order": 100,
+      "title": {"ko": "조향", "en": "Steering"},
+      "description": {
+        "ko": "차량의 횡방향 제어와 관련된 사용자 설정입니다.",
+        "en": "User settings related to lateral vehicle control."
+      }
+    },
+    {
+      "id": "e2e",
+      "order": 900,
+      "title": {"ko": "통신 시험용", "en": "Transport test"},
+      "description": {
+        "ko": "KovaLink 통신 시험에만 쓰는 가짜 항목입니다. 차량 동작과 연결되지 않습니다.",
+        "en": "Fake entries used only by the KovaLink transport test. They are not connected to vehicle behavior."
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "steering.always_on",
+      "groupId": "steering",
+      "order": 100,
+      "type": "boolean",
+      "defaultValue": false,
+      "title": {"ko": "항시 조향", "en": "Always-on steering"},
+      "description": {
+        "ko": "지원되는 차량과 안전 조건에서 종방향 크루즈 상태와 독립적으로 조향 보조를 사용할 수 있도록 요청합니다. 실제 적용에는 별도의 차량 기능 소비자와 안전 검증이 필요합니다.",
+        "en": "Requests steering assistance independently of longitudinal cruise state when vehicle support and safety conditions allow. Activation requires a separate vehicle-capability consumer and safety validation."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "availability": "pendingConsumer",
+      "requiredCapabilities": ["alwaysSteering"]
+    },
+    {
+      "key": "e2e.level",
+      "groupId": "e2e",
+      "order": 100,
+      "type": "integer",
+      "defaultValue": 3,
+      "minimum": 0,
+      "maximum": 10,
+      "step": 1,
+      "unit": {"ko": "단계", "en": "steps"},
+      "title": {"ko": "시험 단계", "en": "Test level"},
+      "description": {
+        "ko": "정수 범위 항목 시험용입니다. 0부터 10까지 고를 수 있습니다.",
+        "en": "Integer range test entry. Allowed values are 0 to 10."
+      },
+      "access": "readWrite",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
+    },
+    {
+      "key": "e2e.gain",
+      "groupId": "e2e",
+      "order": 200,
+      "type": "number",
+      "defaultValue": 1.0,
+      "minimum": 0.5,
+      "maximum": 2.0,
+      "step": 0.1,
+      "unit": {"ko": "배", "en": "x"},
+      "title": {"ko": "시험 배율", "en": "Test gain"},
+      "description": {
+        "ko": "실수 범위 항목 시험용입니다. 바꾼 값은 다시 시작한 뒤에 쓰인다고 가정합니다.",
+        "en": "Number range test entry. The value is assumed to take effect after a restart."
+      },
+      "access": "readWrite",
+      "risk": "behavior",
+      "applyPolicy": "restart",
+      "availability": "available"
+    },
+    {
+      "key": "e2e.mode",
+      "groupId": "e2e",
+      "order": 300,
+      "type": "enum",
+      "defaultValue": "normal",
+      "options": ["calm", "normal", "lively"],
+      "optionTitles": {
+        "calm": {"ko": "차분하게", "en": "Calm"},
+        "normal": {"ko": "보통", "en": "Normal"},
+        "lively": {"ko": "활발하게", "en": "Lively"}
+      },
+      "title": {"ko": "시험 방식", "en": "Test mode"},
+      "description": {
+        "ko": "하나를 고르는 항목 시험용입니다.",
+        "en": "Single-choice test entry."
+      },
+      "access": "readWrite",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
+    },
+    {
+      "key": "e2e.build_label",
+      "groupId": "e2e",
+      "order": 400,
+      "type": "string",
+      "defaultValue": "e2e-fixture",
+      "title": {"ko": "시험 이름표", "en": "Test label"},
+      "description": {
+        "ko": "읽기 전용 항목 시험용입니다.",
+        "en": "Read-only test entry."
+      },
+      "access": "readOnly",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
+    },
+    {
+      "key": "e2e.hidden_flag",
+      "groupId": "e2e",
+      "order": 500,
+      "type": "boolean",
+      "defaultValue": false,
+      "hidden": true,
+      "title": {"ko": "숨긴 시험 항목", "en": "Hidden test entry"},
+      "description": {
+        "ko": "앱에 보이지 않아야 하는 항목입니다.",
+        "en": "Entry that the app must not show."
+      },
+      "access": "readWrite",
+      "risk": "display",
+      "applyPolicy": "immediate",
+      "availability": "available"
+    }
+  ]
+}
