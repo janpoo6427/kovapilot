@@ -145,6 +145,7 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | `POST /v1/git/plan` | Validated switch or reset preview |
 | `POST /v1/git/switch`, `POST /v1/git/reset` | Operation-specific preview aliases |
 | `POST /v1/git/apply` | Queue a reviewed branch or commit for the offroad updater |
+| `POST /v1/device/restart` | Ask manager to reboot the offroad device |
 
 Telemetry frames include `schemaVersion: 1`, `monotonicTimeNanos` and
 `speedMps`. The frame can also include gear, turn signals, brake status,
@@ -173,6 +174,13 @@ staged, installed or failed. The updater stages the reviewed commit. The
 prepared update is eligible for installation at the next device restart.
 The status and branch
 APIs avoid changing Git refs while a Link update is queued or staged.
+
+`GET /v1/git/status` also returns `restartEnabled`. `POST /v1/device/restart`
+sets `DoReboot`, the same request as the device's Reboot button, and returns
+HTTP 202 `{"restarting": true}`. It needs the same authorization as apply,
+an offroad device, an updater that is not finalizing, and no Link update
+still downloading; otherwise it returns 403 `restart_blocked`. A staged Link
+update is installed by that restart.
 
 Boot migrates old external Git LFS filter configuration to the included LFS
 client when the external command is missing.
