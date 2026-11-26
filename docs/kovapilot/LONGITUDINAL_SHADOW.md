@@ -44,6 +44,8 @@ python -m openpilot.kovapilot.longitudinal.replay_shadow /path/to/rlog.zst \
 
 `plannerd`는 새 주행 세션에서 `KovaParams`의 offroad 설정을 읽는다. 지원 차량의 종방향이 활성이고 옵션 `1`~`3`을 설정한 경우, 로컬 내비 어댑터가 발행하는 `kovaCameraEvents`를 선택적으로 읽는다. 기본값 `0`에서는 구독하지 않는다. 이 내부 주제는 별도 신뢰된 어댑터에서 경로·방향과 단일 지점 카메라를 확인한 뒤 쓰도록 정의했다. `verifiedSinglePoint`와 `roadMatch`가 모두 확인된 데이터만 고려한다. 배치 수신에 실패해도 일반 플래너 메시지 유효성에는 영향이 없다.
 
+입력 어댑터는 `navcamd`(openpilot/kovapilot/navigation)다. 같은 주행 조건(종방향·옵션 1~3)일 때만 네트워크를 연다. carrot의 옛 CarrotMan 방식과 같게 UDP 7705로 자기 주소를 알리고(연결 전 1초, 연결 후 앱 주소로 0.2초), 수정된 내비 앱이 UDP 7706으로 보내는 JSON의 `nSdiType`·`nSdiSpeedLimit`·`nSdiDist`·`nSdiBlockType`·`nSdiBlockDist`·`nSdiPlusType`·`nSdiPlusDist`·`roadcate`만 쓴다. Wi-Fi 서브넷의 사설 주소에서 온 것만 받고(Tailscale·루프백·공인 주소는 버림), 4초 동안 패킷이 없으면 연결이 끊긴 것으로 본다. carrot 기본값대로 고정·신호·구간 시작/끝·박스형(0·1·2·3·8), 후면(75·76, 통과 뒤 100 m 유지), 구간단속(블록 2·3 또는 4, 끝날 때까지 제한속도), 방지턱(22, roadcate>1, 35 km/h, 2 m 앞에서 끝)을 감속 대상으로 하고 이동식(7)은 쓰지 않는다. 앱이 연결돼 있지 않으면 순정 내비 경고를 쓴다: CAN `Navi_HU`(0x544) `SpeedLim_Nav_Clu`+`SpeedLim_Nav_Cam`, CAN-FD E-CAN `HDA_INFO_4A3` `SPEED_LIMIT`+`MapSource`==2. 순정 경고는 거리가 없어 carrot처럼 제한속도×6초를 가상 거리로 쓰고 경고가 끝날 때까지 유지한다.
+
 유효 카메라 상한은 플래너의 추가 크루즈 감속 후보로 들어간다. 기본 플래너의 선행차·모델 후보와 최소 가속도를 비교하며, 카메라만으로 정차 상태를 만들지 않는다. 기존 감속률과 jerk 한계를 적용한다. 페달·CANCEL·강제 감속에는 기존 경로를 적용한다. 확인된 통과는 프로필별 복귀를 사용하고, 만료로 사라진 상한은 일반 크루즈 jerk 한계 내에서 해제한다. 실제 도달 거리에는 기존 플래너·차량 감속 한계가 영향을 준다.
 
 실시간 모드에서는 카메라 메시지 사이의 남은 거리를 최근 CAN 차량 속도로 보정한다. 원본 거리와 시각은 그대로 사용해 만료와 입력 충돌을 확인한다. 속도 이력이 끊기면 원본 거리를 사용하며, 보정 거리가 0이 돼도 통과로 처리하지 않는다. 감속 시작에 쓰는 이동 거리는 기존 크루즈 감속·jerk 한계, 크루즈 응답 시간, 차량 액추에이터 지연을 반영한다. 거리와 응답의 보정값은 플래너 계산용이며 목표속도 도달 성능은 실제 차량에서 따로 검증한다.
