@@ -68,11 +68,29 @@ def _device_state(request: web.Request) -> dict[str, bool]:
   return {"offroad": bool(request.app[OFFROAD_PROVIDER_KEY]()), "parked": bool(parked and parked())}
 
 
+def _dependency_conditions(request: web.Request) -> dict[str, str]:
+  provider = request.app.get(DEPENDENCY_CONDITIONS_KEY)
+  return provider() if provider is not None else {}
+
+
+def _curve_application(request: web.Request, conditions: dict[str, str]) -> int | str | None:
+  longitudinal = conditions.get("openpilotLongitudinalApplied")
+  if longitudinal == "unsupported":
+    return "unsupported"
+  if longitudinal in ("unmet", "pendingRestart"):
+    return "awaitingLongitudinal"
+  provider = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
+  applied = provider() if provider is not None else None
+  # Without vehicle capability data, the planner cannot distinguish a disabled
+  # longitudinal preference from an unsupported vehicle or planner.
+  return None if longitudinal == "unknown" and applied == "unsupported" else applied
+
+
 def _with_device_state(request: web.Request, document: dict[str, Any], device_state: dict[str, bool] | None = None) -> dict[str, Any]:
   document["device"] = _device_state(request) if device_state is None else device_state
   allowed = _allowed_write_risks(request)
   applied_cruise = request.app.get(APPLIED_CRUISE_PROVIDER_KEY)
-  applied_curve = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
+  conditions = _dependency_conditions(request)
   for setting in document["settings"]:
     if allowed is not None and setting.get("risk") not in allowed:
       setting["access"] = "readOnly"
@@ -81,9 +99,21 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
       provider = applied_cruise
       if provider is None:
         setting["applyState"] = "awaitingStart"
-    elif setting["key"] == CURVE_SLOWDOWN_KEY and applied_curve is not None:
-      provider = applied_curve
-      setting["applyStatus"] = "available"
+    elif setting["key"] == CURVE_SLOWDOWN_KEY:
+      applied = _curve_application(request, conditions)
+      if applied == "unsupported":
+        setting["applyStatus"] = "unsupported"
+        setting["access"] = "readOnly"
+      elif applied == "awaitingLongitudinal":
+        setting["applyStatus"] = "available"
+        setting["applyState"] = applied
+      elif APPLIED_CURVE_PROVIDER_KEY in request.app:
+        setting["applyStatus"] = "available"
+        if applied is None:
+          setting["applyState"] = "awaitingStart"
+        else:
+          setting["appliedValue"] = applied
+          setting["applyState"] = "applied" if applied == setting["value"] else "pendingParked"
     elif setting["key"] == LEAD_RESTART_KEY:
       provider = request.app.get(APPLIED_LEAD_RESTART_PROVIDER_KEY)
       if provider is None:
@@ -103,10 +133,6 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
         ]
     if provider is not None:
       applied = provider()
-      if applied == "unsupported":
-        setting["applyStatus"] = "unsupported"
-        setting["access"] = "readOnly"
-        continue
       if applied is None:
         setting["applyState"] = "awaitingStart"
       else:
@@ -118,8 +144,7 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
   native = request.app.get(NATIVE_LONGITUDINAL)
   if native is not None:
     document["settings"].append(native.setting())
-  dependency_conditions = request.app.get(DEPENDENCY_CONDITIONS_KEY)
-  evaluate_dependencies(document["settings"], dependency_conditions() if dependency_conditions is not None else {})
+  evaluate_dependencies(document["settings"], conditions)
   return document
 
 
@@ -168,9 +193,8 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(400, "invalid_json", "request body must be valid JSON")
 
   store = request.app[KOVA_PARAMS_STORE_KEY]
-  applied_curve = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
-  if key == CURVE_SLOWDOWN_KEY and applied_curve is not None and applied_curve() == "unsupported":
-    return _error(403, "update_forbidden", "curve slowdown requires openpilot longitudinal control")
+  if key == CURVE_SLOWDOWN_KEY and _curve_application(request, _dependency_conditions(request)) == "unsupported":
+    return _error(403, "update_forbidden", "curve slowdown is unsupported by the vehicle or planner")
   device_state = _device_state(request)
   try:
     if key == NATIVE_LONGITUDINAL_KEY and (native := request.app.get(NATIVE_LONGITUDINAL)) is not None:

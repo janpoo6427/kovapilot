@@ -39,10 +39,14 @@ response reports the running process's acknowledged value separately, with
 `applyState` set to `applied`, `pendingRestart`, or `awaitingStart`.
 Saving never restarts the process.
 
-`cruise.curve_slowdown` defaults to `0` (off) and uses `1` for on. It applies to vehicles with openpilot
-longitudinal control. Authorized saves remain in `pendingParked` until the
-running planner confirms the vehicle is stationary in Park with controls
-disengaged. The planner then applies the value without a restart.
+`cruise.curve_slowdown` defaults to `0` (off) and uses `1` for on. On a
+supported vehicle, authorized users can save the preference while openpilot
+longitudinal control is off. The Gateway reports `awaitingLongitudinal` until
+that dependency is active and `awaitingStart` if the planner has yet to
+acknowledge a value. When the planner's `appliedValue` differs from the saved
+`value`, the Gateway reports `pendingParked`. The running planner applies the
+change in Park at a standstill with controls disengaged. An unsupported vehicle
+or planner reports `applyStatus: unsupported` and the setting is read-only.
 
 The `cruise.openpilot_longitudinal` switch shows the existing
 `AlphaLongitudinalEnabled` preference as 0 or 1 and reports the effective
