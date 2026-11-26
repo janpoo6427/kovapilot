@@ -10,7 +10,8 @@ from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
-from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONG_KEY, PARAM as NATIVE_LONG_PARAM, NativeLongitudinal
+from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONG_KEY, PARAM as NATIVE_LONG_PARAM
+from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_dependency_conditions
 from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
 
 
@@ -32,6 +33,70 @@ async def _with_client(test_case, *, is_offroad=True):
   app = create_app(KovaParamsStore(MemoryBackend()), lambda: is_offroad)
   async with TestClient(TestServer(app)) as client:
     await test_case(client)
+
+
+def test_gateway_reports_saved_and_applied_dependency_states_without_rewriting_preferences():
+  from opendbc.car.structs import car
+
+  class VehicleParams:
+    values = {}
+
+    def get(self, key):
+      return self.values.get(key)
+
+    def get_bool(self, key):
+      return bool(self.get(key))
+
+  vehicle = VehicleParams()
+  backend = MemoryBackend()
+  store = KovaParamsStore(backend)
+  app = create_app(store, lambda: True, dependency_conditions=lambda: vehicle_dependency_conditions(vehicle))
+
+  async def check():
+    async with TestClient(TestServer(app)) as client:
+      async def setting(key):
+        response = await client.get("/v1/kova-params")
+        document = await response.json()
+        return next(item for item in document["settings"] if item["key"] == key)
+
+      async def update(key, value, revision):
+        response = await client.post("/v1/kova-params/update", json={"key": key, "value": value, "expectedRevision": revision})
+        assert response.status == 200
+        return await response.json()
+
+      def state(item, condition):
+        return next(d["state"] for d in item["dependencies"] if d["condition"] == condition)
+
+      assert state(await setting(CRUISE_SYNC_KEY), "openpilotLongitudinalApplied") == "unknown"
+      assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "unmet"
+      assert (await update("display.onroad_brightness_mode", 2, 0))["revision"] == 1
+      assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "met"
+      assert (await update(CRUISE_SYNC_KEY, 1, 1))["revision"] == 2
+
+      cp = car.CarParams.new_message(alphaLongitudinalAvailable=True, pcmCruise=True)
+      vehicle.values.update(CarParams=cp.to_bytes(), AlphaLongitudinalEnabled=True)
+      cruise = await setting(CRUISE_SYNC_KEY)
+      assert state(cruise, "openpilotLongitudinalApplied") == "pendingRestart"
+      assert state(cruise, "openpilotCruiseSpeedOwner") == "pendingRestart"
+
+      cp = car.CarParams.new_message(alphaLongitudinalAvailable=True, openpilotLongitudinalControl=True, pcmCruise=False)
+      vehicle.values.update(CarParams=cp.to_bytes(), DisengageOnAccelerator=True)
+      cruise = await setting(CRUISE_SYNC_KEY)
+      assert state(cruise, "openpilotLongitudinalApplied") == "met"
+      assert state(cruise, "openpilotCruiseSpeedOwner") == "met"
+      assert state(cruise, "acceleratorDisengagementOff") == "unmet"
+      assert state(await setting("navigation.speed_camera_profile"), "verifiedCameraInput") == "pendingConsumer"
+
+      cp = car.CarParams.new_message(pcmCruise=True)
+      vehicle.values["CarParams"] = cp.to_bytes()
+      cruise = await setting(CRUISE_SYNC_KEY)
+      assert state(cruise, "openpilotLongitudinalApplied") == "unsupported"
+      assert state(await setting(CRUISE_SYNC_SHADOW_KEY), "stockCruiseSpeedOwner") == "met"
+      assert cruise["value"] == 1
+      assert all("state" not in entry for entry in next(s for s in store.document()["settings"] if s["key"] == CRUISE_SYNC_KEY)["dependencies"])
+      assert (await update(CRUISE_SYNC_KEY, 0, 2))["revision"] == 3
+
+  asyncio.run(check())
 
 
 def test_same_subnet_can_save_control_preferences_without_a_token(tmp_path, monkeypatch):

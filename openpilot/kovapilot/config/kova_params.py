@@ -153,6 +153,28 @@ def _validate_constraints(setting: dict[str, Any], locales: set[str]) -> None:
     raise KovaParamsValidationError(f"options are only valid for enum settings: {key}")
 
 
+def _validate_dependencies(settings: list[dict[str, Any]], locales: set[str]) -> None:
+  by_key = {setting["key"]: setting for setting in settings}
+  for key, setting in by_key.items():
+    dependencies = setting.get("dependencies", [])
+    if not isinstance(dependencies, list):
+      raise KovaParamsValidationError(f"dependencies for {key} must be an array")
+    for dependency in dependencies:
+      if not isinstance(dependency, dict):
+        raise KovaParamsValidationError(f"invalid dependency for {key}")
+      _validate_localized_text(dependency.get("title"), locales, f"dependency title for {key}")
+      if "condition" in dependency:
+        condition, linked_setting = dependency["condition"], dependency.get("setting")
+        if (not isinstance(condition, str) or not condition or "equals" in dependency or
+            ("setting" in dependency and (not isinstance(linked_setting, str) or not linked_setting or linked_setting == key))):
+          raise KovaParamsValidationError(f"invalid condition dependency for {key}")
+      else:
+        linked_setting = dependency.get("setting")
+        if not isinstance(linked_setting, str) or linked_setting == key or linked_setting not in by_key:
+          raise KovaParamsValidationError(f"invalid setting dependency for {key}")
+        _validate_value(by_key[linked_setting], dependency.get("equals"))
+
+
 def validate_catalog(catalog: Any) -> None:
   if not isinstance(catalog, dict) or catalog.get("schemaVersion") != 1:
     raise KovaParamsValidationError("catalog schemaVersion must be 1")
@@ -194,6 +216,7 @@ def validate_catalog(catalog: Any) -> None:
     _validate_localized_text(setting.get("description"), locales, f"setting {setting['key']} description")
     _validate_constraints(setting, locales)
     _validate_value(setting, setting.get("defaultValue"))
+  _validate_dependencies(settings, locales)
 
 
 class KovaParamsStore:

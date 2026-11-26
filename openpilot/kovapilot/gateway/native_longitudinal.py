@@ -44,17 +44,54 @@ class NativeLongitudinal:
     self.params.put_bool(PARAM, value == 1, block=True)
 
 
-def vehicle_capability(params) -> tuple[bool | None, bool]:
+def _vehicle_longitudinal_state(params) -> tuple[bool | None, bool, bool | None]:
   from capnp import KjException
   from opendbc.car.structs import car
 
+  release_branch = params.get_bool("IsReleaseBranch")
+  raw = params.get("CarParams")
+  if raw is not None:
+    try:
+      with car.CarParams.from_bytes(raw) as cp:
+        usable = not cp.dashcamOnly and not cp.notCar
+        return (bool(usable and not release_branch and cp.alphaLongitudinalAvailable),
+                bool(usable and cp.openpilotLongitudinalControl), bool(cp.pcmCruise) if usable else None)
+    except (ValueError, KjException):
+      pass
+  return None, False, None
+
+
+def vehicle_capability(params) -> tuple[bool | None, bool]:
   if params.get_bool("IsReleaseBranch"):
     return False, False
-  raw = params.get("CarParams")
-  if raw is None:
-    return None, False
-  try:
-    with car.CarParams.from_bytes(raw) as cp:
-      return bool(cp.alphaLongitudinalAvailable and not cp.dashcamOnly and not cp.notCar), bool(cp.openpilotLongitudinalControl)
-  except (ValueError, KjException):
-    return None, False
+  supported, applied, _ = _vehicle_longitudinal_state(params)
+  return supported, applied
+
+
+def vehicle_dependency_conditions(params) -> dict[str, str]:
+  supported, applied, pcm_cruise = _vehicle_longitudinal_state(params)
+  if supported is None:
+    longitudinal = "unknown"
+  elif applied:
+    longitudinal = "met"
+  elif not supported:
+    longitudinal = "unsupported"
+  elif params.get_bool(PARAM):
+    longitudinal = "pendingRestart"
+  else:
+    longitudinal = "unmet"
+  if pcm_cruise is None:
+    openpilot_speed_owner = stock_speed_owner = "unknown"
+  elif pcm_cruise:
+    openpilot_speed_owner = "unsupported" if applied else longitudinal
+    stock_speed_owner = "met"
+  else:
+    openpilot_speed_owner, stock_speed_owner = "met", "unsupported"
+  return {
+    "openpilotLongitudinalApplied": longitudinal,
+    "openpilotCruiseSpeedOwner": openpilot_speed_owner,
+    "stockCruiseSpeedOwner": stock_speed_owner,
+    "acceleratorDisengagementOff": "unmet" if params.get_bool("DisengageOnAccelerator") else "met",
+    "verifiedCameraInput": "pendingConsumer",
+    "independentLateralControl": "pendingConsumer",
+  }

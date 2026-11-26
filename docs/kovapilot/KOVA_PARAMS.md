@@ -13,6 +13,7 @@ The catalog is `openpilot/kovapilot/config/kova_params.json` and follows `kova_p
 - Unknown catalog fields are allowed so later metadata can be added compatibly.
 - `integer` and `number` settings may declare inclusive `minimum`/`maximum`, a positive `step`, and a localized `unit`. The store rejects defaults and updates outside the range.
 - Bundled settings use numeric values. `enum` settings declare unique integer `options` and may declare localized `optionTitles`. Options `[0, 1]` with `"control": "switch"` render as a switch in KovaLink. Values match the exact JSON type.
+- Optional `dependencies` describe prerequisites. A stored setting dependency uses `setting` and `equals`. A device condition uses `condition`, with an optional `setting` linking to the related preference. Each entry has a localized `title`.
 
 The first sample is `steering.always_on` (`항시 조향`). It defaults to `0`, can only be changed offroad, and reports `pendingConsumer`. A vehicle-capability consumer must exist before the setting can affect steering.
 
@@ -37,6 +38,8 @@ Before starting the managed processes, the manager initializes missing settings 
 The gateway read response should use `KovaParamsStore.document()`, which returns the full catalog plus `revision`, each current `value`, and `applyStatus`. The gateway adds a read-only `device` object (`{"offroad": bool}`, read from the device's own `IsOffroad`) to read and successful update responses so KovaLink can lock offroad-only settings before sending; the update handler still enforces the policy itself. The gateway write handler should call `update()` with the device's authoritative offroad state; it must not trust an offroad flag supplied by KovaLink.
 
 The `aiohttp` Gateway in `openpilot/kovapilot/gateway` exposes `GET /v1/health`, `GET /v1/kova-params`, and `POST /v1/kova-params/update`. It starts automatically on comma. Local-network sessions can save writable catalog settings, including control preferences. The Gateway enforces each setting's access and policies. See [KovaLink Gateway](KOVALINK_GATEWAY.md) for the transport modes.
+
+The Gateway appends a `state` to each dependency in read and successful update responses. States are `met`, `unmet`, `pendingRestart`, `pendingConsumer`, `unsupported`, and `unknown`. For openpilot longitudinal control, it distinguishes the saved preference from the mode selected by the current vehicle session. Dependency results explain availability in the app and do not change stored preferences or replace the runtime's existing control checks.
 
 ## Development transport test
 

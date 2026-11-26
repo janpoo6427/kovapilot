@@ -24,6 +24,7 @@ from openpilot.kovapilot.gateway.camera import camera_offer
 from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
+from openpilot.kovapilot.gateway.setting_dependencies import evaluate_dependencies
 
 
 API_SCHEMA_VERSION = 1
@@ -34,6 +35,7 @@ OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
 APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], int | None])
 APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], int | str | None])
+DEPENDENCY_CONDITIONS_KEY = web.AppKey("dependency_conditions", Callable[[], dict[str, str]])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
 CAMERA_KEY = web.AppKey("camera", Callable)
@@ -95,6 +97,8 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
   native = request.app.get(NATIVE_LONGITUDINAL)
   if native is not None:
     document["settings"].append(native.setting())
+  dependency_conditions = request.app.get(DEPENDENCY_CONDITIONS_KEY)
+  evaluate_dependencies(document["settings"], dependency_conditions() if dependency_conditions is not None else {})
   return document
 
 
@@ -327,6 +331,7 @@ async def git_apply(request):
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
+               dependency_conditions: Callable[[], dict[str, str]] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
@@ -337,6 +342,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[APPLIED_CRUISE_PROVIDER_KEY] = applied_cruise_provider
   if applied_curve_provider is not None:
     app[APPLIED_CURVE_PROVIDER_KEY] = applied_curve_provider
+  if dependency_conditions is not None:
+    app[DEPENDENCY_CONDITIONS_KEY] = dependency_conditions
   app[SOCKETS_KEY] = set()
   app[LAN_SOCKETS_KEY] = set()
   if lan_access is not None:

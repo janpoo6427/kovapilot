@@ -38,6 +38,9 @@
   "settings": [
     {
       "key": "steering.always_on",
+      "dependencies": [
+        {"condition": "independentLateralControl", "title": {"ko": "독립 횡제어 지원 및 연동", "en": "Independent lateral control support and integration"}}
+      ],
       "groupId": "steering",
       "order": 100,
       "type": "enum",
@@ -59,6 +62,10 @@
     },
     {
       "key": "navigation.speed_camera_profile",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "verifiedCameraInput", "title": {"ko": "검증된 내비 카메라 입력", "en": "Verified navigation camera input"}}
+      ],
       "groupId": "navigation",
       "order": 100,
       "type": "enum",
@@ -106,6 +113,9 @@
     },
     {
       "key": "display.onroad_brightness_fixed",
+      "dependencies": [
+        {"setting": "display.onroad_brightness_mode", "equals": 2, "title": {"ko": "화면 밝기 모드 · 고정", "en": "Screen brightness mode · Fixed"}}
+      ],
       "groupId": "display",
       "order": 110,
       "type": "integer",
@@ -127,6 +137,11 @@
     },
     {
       "key": "cruise.accelerator_sync",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "openpilotCruiseSpeedOwner", "title": {"ko": "KOVA 크루즈 설정속도 제어", "en": "KOVA cruise set speed control"}},
+        {"condition": "acceleratorDisengagementOff", "title": {"ko": "가속페달을 밟을 때 주행 보조 해제 · 끔", "en": "Disengage on accelerator pedal · Off"}}
+      ],
       "groupId": "cruise",
       "order": 100,
       "type": "enum",
@@ -147,6 +162,9 @@
     },
     {
       "key": "cruise.curve_slowdown",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}}
+      ],
       "groupId": "cruise",
       "order": 150,
       "type": "enum",
@@ -167,6 +185,10 @@
     },
     {
       "key": "cruise.accelerator_sync_stock_shadow",
+      "dependencies": [
+        {"condition": "stockCruiseSpeedOwner", "title": {"ko": "순정 ACC 설정속도 제어", "en": "Stock ACC cruise set speed control"}},
+        {"condition": "acceleratorDisengagementOff", "title": {"ko": "가속페달을 밟을 때 주행 보조 해제 · 끔", "en": "Disengage on accelerator pedal · Off"}}
+      ],
       "groupId": "cruise",
       "order": 200,
       "type": "enum",
