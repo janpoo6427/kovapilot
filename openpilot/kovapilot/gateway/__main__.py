@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 import sys
-from functools import partial
+from functools import cache, partial
 from pathlib import Path
 from subprocess import SubprocessError
 
@@ -18,6 +18,14 @@ from openpilot.kovapilot.gateway.runtime import prepare_tls_identity
 
 LOOPBACK_HOST = "127.0.0.1"
 DEFAULT_PORT = 8082
+
+
+@cache
+def vpn_device_info() -> dict:
+  from openpilot.common.version import get_build_metadata
+
+  metadata = get_build_metadata()
+  return {"branch": metadata.channel, "version": metadata.openpilot.version, "commit": metadata.openpilot.git_commit}
 
 
 def main() -> None:
@@ -40,6 +48,7 @@ def main() -> None:
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
   from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
   from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
+  from openpilot.kovapilot.gateway.tailscale import Tailscale
   from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
   settings_params = Params()
@@ -55,8 +64,11 @@ def main() -> None:
   except (OSError, ValueError, SubprocessError):
     cloudlog.warning("KovaLink Gateway Wi-Fi disabled: invalid TLS or credential configuration")
   telemetry = CerealTelemetry()
+  def is_offroad() -> bool:
+    return device_state_params.get_bool("IsOffroad")
+
   app = create_app(
-    store, lambda: device_state_params.get_bool("IsOffroad"),
+    store, is_offroad,
     parked_provider=telemetry.is_parked_and_disengaged, applied_cruise_provider=telemetry.applied_cruise_sync,
     applied_curve_provider=telemetry.applied_curve_slowdown,
     applied_lead_restart_provider=telemetry.applied_lead_restart,
@@ -76,6 +88,8 @@ def main() -> None:
     restart=DeviceRestart(partial(restart_allowed, device_state_params, PC),
                           lambda: device_state_params.put_bool(REBOOT_KEY, True, block=True)),
   )
+  if not PC and lan is not None and lan[0].token_digest is not None:
+    Tailscale(provisioned.parent / "tailscale", lan[0], is_offroad, telemetry, vpn_device_info).attach(app)
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
   else:

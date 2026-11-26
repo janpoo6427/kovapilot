@@ -353,11 +353,13 @@ def test_gateway_updates_cruise_config_seen_by_another_store():
 
 def test_curve_slowdown_reports_planner_application_and_unsupported_vehicle():
   store = KovaParamsStore(MemoryBackend())
-  applied = None
+  applied = "unsupported"
+  longitudinal = "unknown"
 
   async def check():
-    nonlocal applied
-    app = create_app(store, lambda: False, applied_curve_provider=lambda: applied)
+    nonlocal applied, longitudinal
+    app = create_app(store, lambda: False, applied_curve_provider=lambda: applied,
+                     dependency_conditions=lambda: {"openpilotLongitudinalApplied": longitudinal})
     async with TestClient(TestServer(app)) as client:
       async def setting(response):
         assert response.status == 200
@@ -366,8 +368,22 @@ def test_curve_slowdown_reports_planner_application_and_unsupported_vehicle():
       payload = {"key": CURVE_SLOWDOWN_KEY, "value": 1, "expectedRevision": 0}
       pending = await setting(await client.get("/v1/kova-params"))
       assert pending["applyState"] == "awaitingStart"
-      applied = 0
+      assert "appliedValue" not in pending
+      longitudinal = "unmet"
       saved = await setting(await client.post("/v1/kova-params/update", json=payload))
+      assert (saved["value"], saved["applyStatus"], saved["applyState"], saved["access"]) == (
+        1, "available", "awaitingLongitudinal", "readWrite")
+      assert saved["dependencies"][0]["state"] == "unmet"
+      assert "appliedValue" not in saved
+
+      longitudinal = "pendingRestart"
+      waiting = await setting(await client.get("/v1/kova-params"))
+      assert waiting["applyState"] == "awaitingLongitudinal"
+      assert waiting["dependencies"][0]["state"] == "pendingRestart"
+      longitudinal, applied = "met", None
+      assert (await setting(await client.get("/v1/kova-params")))["applyState"] == "awaitingStart"
+      applied = 0
+      saved = await setting(await client.get("/v1/kova-params"))
       assert saved["applyPolicy"] == "parked"
       assert saved["applyState"] == "pendingParked"
       assert saved["value"] == 1 and saved["appliedValue"] == 0
@@ -383,6 +399,11 @@ def test_curve_slowdown_reports_planner_application_and_unsupported_vehicle():
       response = await client.post("/v1/kova-params/update", json=payload)
       assert response.status == 403
       assert store.values()[CURVE_SLOWDOWN_KEY] == 1
+      longitudinal, applied = "unsupported", None
+      unsupported = await setting(await client.get("/v1/kova-params"))
+      assert "applyState" not in unsupported
+      assert unsupported["applyStatus"] == "unsupported"
+      assert (await client.post("/v1/kova-params/update", json=payload)).status == 403
 
   asyncio.run(check())
 
