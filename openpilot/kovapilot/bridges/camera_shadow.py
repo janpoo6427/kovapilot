@@ -26,9 +26,12 @@ class Approach:
   was_over_target: bool = False
   last_cap_mps: float | None = None
   was_eligible: bool = False
+  # The distance is an estimate (stock navigation): start on receipt and reach the target by the
+  # margin before the estimated point, whatever the profile, using as little of decel_limit as fits.
+  estimated_distance: bool = False
 
   def sample(self, profile: int, distance_m: float, ego_mps: float, now_ns: int, eligible: bool) -> dict:
-    finish_m = target_distance(profile, self.initial_distance_m, self.target_mps)
+    finish_m = target_distance(3 if self.estimated_distance else profile, self.initial_distance_m, self.target_mps)
     if self.last_sample_ns is not None and self.was_over_target:
       self.overspeed_s += min(0.25, (now_ns - self.last_sample_ns) / 1e9)
     self.last_sample_ns = now_ns
@@ -40,7 +43,7 @@ class Approach:
       reserve_m = ego_mps * self.response_time_s if ego_mps > self.target_mps else 0.0
       minimum = speed_ramp(max(ego_mps, self.target_mps), self.target_mps, self.decel_limit_mps2, max_jerk_mps3=self.jerk_limit_mps3)
       # Allow one model update of travel to avoid crossing the calculated start between frames.
-      if profile == 1 or distance_m <= finish_m + reserve_m + minimum.distance_m + ego_mps * 0.05:
+      if profile == 1 or self.estimated_distance or distance_m <= finish_m + reserve_m + minimum.distance_m + ego_mps * 0.05:
         self.start_distance_m = distance_m
         self.response_distance_m = reserve_m
         self.ramp = speed_ramp(minimum.start_mps, self.target_mps, self.decel_limit_mps2, distance_m - finish_m - reserve_m,
@@ -81,9 +84,12 @@ class Recovery:
 
 class CameraShadow:
   def __init__(self, profile: int, *, decel_limit_mps2: float = PROFILE_ACCEL_MPS2, jerk_limit_mps3: float = PROFILE_JERK_MPS3,
-               response_time_s: float = 0.0):
+               response_time_s: float = 0.0, estimated_distance_sources: dict[str, float] | None = None):
     self.profile = profile
     self.decel_limit_mps2 = decel_limit_mps2
+    # Sources whose distance is an estimate (e.g. distance-less stock navigation warnings), with the
+    # deceleration their approaches may plan; other sources use decel_limit_mps2 and the profile.
+    self.estimated_distance_sources = dict(estimated_distance_sources or {})
     self.jerk_limit_mps3 = jerk_limit_mps3
     self.response_time_s = response_time_s
     self.inputs = CameraInputs()
@@ -138,8 +144,9 @@ class CameraShadow:
       initial_m = self.initial_distances[event_id]
       plan = self.approaches.get(event_id)
       if plan is None or plan.target_mps != winner.target_mps:
-        plan = self.approaches[event_id] = Approach(initial_m, winner.target_mps, self.decel_limit_mps2,
-                                                    self.jerk_limit_mps3, self.response_time_s)
+        plan = self.approaches[event_id] = Approach(initial_m, winner.target_mps, self.decel_limit(winner.source),
+                                                    self.jerk_limit_mps3, self.response_time_s,
+                                                    estimated_distance=winner.source in self.estimated_distance_sources)
       active_ids.add(event_id)
       distance_m = max(0.0, winner.distance_m - traveled_since(winner.observed_ns)) if traveled_since else winner.distance_m
       result = plan.sample(self.profile, distance_m, ego_mps, now_ns, eligible)
@@ -161,6 +168,9 @@ class CameraShadow:
       selected = select_candidate(now_ns, cruise_mps, candidates)
       report["selected_candidate"] = asdict(selected) if selected is not None else None
     return report
+
+  def decel_limit(self, source: str) -> float:
+    return self.estimated_distance_sources.get(source, self.decel_limit_mps2)
 
   @staticmethod
   def _conflicts(winner: CameraInput, other: CameraInput, ego_mps: float) -> bool:

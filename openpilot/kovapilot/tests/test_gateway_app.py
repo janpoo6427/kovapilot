@@ -126,6 +126,7 @@ def test_gateway_reports_saved_and_applied_dependency_states_without_rewriting_p
         return next(d["state"] for d in item["dependencies"] if d["condition"] == condition)
 
       assert state(await setting(CRUISE_SYNC_KEY), "openpilotLongitudinalApplied") == "unknown"
+      assert state(await setting("navigation.speed_camera_profile"), "verifiedCameraInput") == "unknown"
       assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "unmet"
       assert (await update("display.onroad_brightness_mode", 2, 0))["revision"] == 1
       assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "met"
@@ -143,7 +144,7 @@ def test_gateway_reports_saved_and_applied_dependency_states_without_rewriting_p
       assert state(cruise, "openpilotLongitudinalApplied") == "met"
       assert state(cruise, "openpilotCruiseSpeedOwner") == "met"
       assert state(cruise, "acceleratorDisengagementOff") == "unmet"
-      assert state(await setting("navigation.speed_camera_profile"), "verifiedCameraInput") == "pendingConsumer"
+      assert state(await setting("navigation.speed_camera_profile"), "verifiedCameraInput") == "met"
 
       cp = car.CarParams.new_message(pcmCruise=True)
       vehicle.values["CarParams"] = cp.to_bytes()

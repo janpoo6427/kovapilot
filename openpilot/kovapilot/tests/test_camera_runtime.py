@@ -7,7 +7,9 @@ from opendbc.car.structs import car
 
 from openpilot.kovapilot.bridges.camera_runtime import CAMERA_EVENT_SERVICE, CameraRuntime, camera_cruise_speed, read_camera_profile
 from openpilot.kovapilot.navigation.camera_input import MAX_CAMERA_AGE_NS
-from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
+from openpilot.kovapilot.navigation.camera_profile import STOCK_NAVI_DECEL_MPS2
+from openpilot.kovapilot.navigation.vehicle_navi import VEHICLE_SOURCE
+from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, A_SPEED_CAP_MIN, LongitudinalPlanner
 
 
 class Inputs(dict):
@@ -131,3 +133,101 @@ class TestCameraPlanner(unittest.TestCase):
         enabled.update(inputs, camera_speed_cap=15.0, camera_eligible=True)
         self.assertEqual(baseline.output_a_target, enabled.output_a_target)
         self.assertIsNone(enabled.a_speed_cap)
+
+
+def sourced_event(seq, distance, source, *, target=16.7):
+  event = messaging.new_message(CAMERA_EVENT_SERVICE, 1, valid=True, logMonoTime=seq * 100_000_000)
+  event.kovaCameraEvents[0] = {
+    "source": source, "session": "a", "eventId": "one", "sequence": seq,
+    "observedMonoTime": event.logMonoTime, "state": "present", "roadMatch": True,
+    "verifiedSinglePoint": True, "distanceM": distance, "targetMps": target,
+  }
+  return event.as_reader()
+
+
+class TestEstimatedDistanceCamera(unittest.TestCase):
+  def live(self, profile):
+    return CameraRuntime(profile, decel_limit_mps2=0.5, jerk_limit_mps3=0.6, response_time_s=1.2,
+                         estimated_distance_sources={VEHICLE_SOURCE: STOCK_NAVI_DECEL_MPS2})
+
+  def test_stock_warning_starts_on_receipt_and_reports_its_deceleration(self):
+    for profile in (1, 2, 3):
+      with self.subTest(profile=profile):
+        runtime = self.live(profile)
+        runtime.update(sourced_event(1, 360.0, VEHICLE_SOURCE))
+        self.assertIsNotNone(runtime.speed_cap(100_000_000, 27.8, 30.0))
+        self.assertEqual(runtime.cap_decel_mps2, STOCK_NAVI_DECEL_MPS2)
+        plan = runtime.policy.approaches["one"]
+        self.assertTrue(plan.estimated_distance)
+        self.assertEqual(plan.start_distance_m, 360.0)
+        # Reaches the target by the margin before the estimated point, the same for every profile.
+        report = runtime.policy.observe(100_000_000, 27.8, 30.0, None)
+        self.assertAlmostEqual(report["cameras"][0]["target_distance_m"], max(20.0, 16.7 * 2.0), places=4)
+        self.assertTrue(report["cameras"][0]["target_feasible"])
+
+  def test_stock_warning_uses_only_the_deceleration_the_distance_needs(self):
+    near, far = self.live(2), self.live(2)
+    near.update(sourced_event(1, 360.0, VEHICLE_SOURCE))
+    far.update(sourced_event(1, 900.0, VEHICLE_SOURCE))
+    near.speed_cap(100_000_000, 27.8, 30.0)
+    far.speed_cap(100_000_000, 27.8, 30.0)
+    near_ramp, far_ramp = near.policy.approaches["one"].ramp, far.policy.approaches["one"].ramp
+    self.assertLess(abs(far_ramp.jerk_mps3) * far_ramp.ramp_s, abs(near_ramp.jerk_mps3) * near_ramp.ramp_s)
+    self.assertLess(abs(far_ramp.jerk_mps3) * far_ramp.ramp_s, 0.5)
+    self.assertLessEqual(abs(near_ramp.jerk_mps3) * near_ramp.ramp_s, STOCK_NAVI_DECEL_MPS2 + 1e-9)
+
+  def test_app_cameras_keep_the_profile_and_cruise_deceleration(self):
+    plain = CameraRuntime(3, decel_limit_mps2=0.5, jerk_limit_mps3=0.6, response_time_s=1.2)
+    live = self.live(3)
+    for runtime in (plain, live):
+      runtime.update(sourced_event(1, 900.0, "carrot_app"))
+      self.assertIsNone(runtime.speed_cap(100_000_000, 27.8, 30.0))
+      self.assertIsNone(runtime.cap_decel_mps2)
+      self.assertFalse(runtime.policy.approaches["one"].estimated_distance)
+      runtime.update(sourced_event(2, 400.0, "carrot_app"))
+    caps = [runtime.speed_cap(200_000_000, 27.8, 30.0) for runtime in (plain, live)]
+    self.assertIsNotNone(caps[0])
+    self.assertEqual(caps[0], caps[1])
+    self.assertEqual(live.cap_decel_mps2, 0.5)
+    self.assertEqual(plain.policy.approaches["one"].ramp, live.policy.approaches["one"].ramp)
+
+  def test_invalidate_keeps_the_estimated_distance_sources(self):
+    runtime = self.live(2)
+    runtime.update(sourced_event(1, 360.0, VEHICLE_SOURCE))
+    runtime.speed_cap(100_000_000, 27.8, 30.0)
+    runtime.invalidate()
+    self.assertIsNone(runtime.cap_decel_mps2)
+    self.assertEqual(runtime.policy.estimated_distance_sources, {VEHICLE_SOURCE: STOCK_NAVI_DECEL_MPS2})
+
+
+class TestCameraPlannerDeceleration(unittest.TestCase):
+  def run_cap(self, **kw):
+    cp = car.CarParams.new_message(openpilotLongitudinalControl=True, longitudinalActuatorDelay=0.5)
+    planner = LongitudinalPlanner(cp, init_v=25.0)
+    inputs = planner_inputs(vCruise=100.0)
+    lowest = 0.0
+    for _ in range(200):
+      planner.update(inputs, camera_speed_cap=10.0, camera_eligible=True, **kw)
+      lowest = min(lowest, planner.a_speed_cap)
+    return lowest
+
+  def test_cruise_floor_holds_without_a_planned_deceleration(self):
+    self.assertAlmostEqual(self.run_cap(), A_CRUISE_MIN)
+    for decel in (0.5, 0.3, float("nan"), float("inf"), -1.0):
+      self.assertAlmostEqual(self.run_cap(camera_decel_mps2=decel), A_CRUISE_MIN)
+
+  def test_planned_camera_deceleration_is_followed_up_to_the_hard_floor(self):
+    self.assertAlmostEqual(self.run_cap(camera_decel_mps2=0.9), -0.9)
+    self.assertAlmostEqual(self.run_cap(camera_decel_mps2=5.0), A_SPEED_CAP_MIN)
+
+  def test_curve_cap_ignores_the_camera_deceleration(self):
+    cp = car.CarParams.new_message(openpilotLongitudinalControl=True, longitudinalActuatorDelay=0.5)
+    planner = LongitudinalPlanner(cp, init_v=25.0)
+    inputs = planner_inputs(vCruise=100.0)
+    lowest = 0.0
+    for _ in range(200):
+      planner.update(inputs, camera_speed_cap=20.0, camera_eligible=True, curve_speed_cap=10.0, curve_eligible=True,
+                     camera_decel_mps2=1.2)
+      lowest = min(lowest, planner.a_speed_cap)
+    self.assertEqual(planner.speed_cap_source, "curve")
+    self.assertAlmostEqual(lowest, A_CRUISE_MIN)

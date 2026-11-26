@@ -21,14 +21,16 @@ from openpilot.common.swaglog import cloudlog
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
 J_CRUISE_BP = [0., 10.0, 25., 40.]
 A_CRUISE_MIN = -0.5
+# Hard floor for a speed cap that was planned with a stronger deceleration (stock navigation cameras).
+A_SPEED_CAP_MIN = -1.2
 CRUISE_ACCEL_RESPONSE_TIME = 1.0
 AGGRESSIVE_ACCEL_BOOST = 0.1  # m/s^2
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 
-def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt):
+def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt, a_min=A_CRUISE_MIN):
   target_accel = smooth_value(v_cruise - v_ego, a_cruise_prev, tau=CRUISE_ACCEL_RESPONSE_TIME, dt=dt)
-  target_accel = np.clip(target_accel, A_CRUISE_MIN, ACCEL_MAX)
+  target_accel = np.clip(target_accel, a_min, ACCEL_MAX)
   j_cruise = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS)
   target_accel = float(np.clip(target_accel, min(a_cruise_prev, a_target_prev) - j_cruise * dt, a_cruise_prev + j_cruise * dt))
 
@@ -55,7 +57,7 @@ class LongitudinalPlanner:
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
   def update(self, sm, *, camera_speed_cap=None, camera_eligible=False, curve_speed_cap=None, curve_eligible=False,
-             lead_restart=None, now_ns=0):
+             lead_restart=None, now_ns=0, camera_decel_mps2=None):
     v_ego = sm['carState'].vEgo
     personality = sm['selfdriveState'].personality
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
@@ -133,7 +135,12 @@ class LongitudinalPlanner:
       if selected is not None:
         cap, self.speed_cap_source = selected
         cap_prev = self.a_speed_cap if self.a_speed_cap is not None else a_cruise_prev
-        self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt)
+        a_min = A_CRUISE_MIN
+        if (self.speed_cap_source == "camera" and camera_decel_mps2 is not None and isfinite(camera_decel_mps2)
+            and camera_decel_mps2 > -A_CRUISE_MIN):
+          # The camera approach was planned for this deceleration; follow it, never beyond A_SPEED_CAP_MIN.
+          a_min = max(-camera_decel_mps2, A_SPEED_CAP_MIN)
+        self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt, a_min)
       elif self.a_speed_cap is not None:
         # An expired cap is released at the existing positive cruise jerk limit.
         step = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS) * self.dt

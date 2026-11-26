@@ -5,6 +5,12 @@ VehicleNaviCanControl 0): the car reports only the camera speed limit and
 that a camera warning is active, without a distance. carrot then assumes a
 virtual distance of limit x VehicleSpeedCameraDistanceTime (default 6.0 s,
 i.e. 360 m for 60 km/h) and holds the limit until the warning ends.
+
+The virtual endpoint is fixed in wheel odometry when the warning starts, so the
+remaining distance shrinks with the distance actually driven. How far before the
+camera the car starts the warning is not documented (carrot only links a real
+distance within the virtual endpoint + 40 m), so plannerd may decelerate these
+approaches harder than app cameras (camera_profile.STOCK_NAVI_DECEL_MPS2).
 """
 from dataclasses import dataclass, field
 
@@ -13,6 +19,7 @@ from openpilot.kovapilot.navigation.carrot_link import MAX_LIMIT_KPH, MIN_LIMIT_
 
 NAVI_HU_ADDR = 0x544  # CAN: Navi_HU (hyundai_can.dbc BO_ 1348)
 HDA_INFO_4A3_ADDR = 0x4A3  # CAN-FD E-CAN: carrot hyundai_canfd.dbc BO_ 1187 HDA_INFO_4A3
+VEHICLE_SOURCE = "vehicle_navi"
 MPH_TO_KPH = 1.609344
 CAMERA_DISTANCE_TIME_S = 6.0
 CONTROLLED_ACCESS_LINK_CLASSES = frozenset((1, 2, 3))  # freeway, IC, JC

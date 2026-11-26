@@ -14,6 +14,8 @@ from openpilot.kovapilot.bridges.lead_restart_runtime import LeadRestartRuntime
 from openpilot.kovapilot.config.curve_slowdown_settings import CurveSlowdownPreference, publish_applied_curve_slowdown
 from openpilot.kovapilot.config.lead_restart_settings import LeadRestartPreference, publish_applied_lead_restart
 from openpilot.kovapilot.longitudinal.curve_slowdown import CurveLimits, MIN_MOVING_SPEED_MPS
+from openpilot.kovapilot.navigation.camera_profile import STOCK_NAVI_DECEL_MPS2
+from openpilot.kovapilot.navigation.vehicle_navi import VEHICLE_SOURCE
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.selfdrive.controls.lib.ldw import LaneDepartureWarning
 from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, CRUISE_ACCEL_RESPONSE_TIME, J_CRUISE_VALS, LongitudinalPlanner
@@ -51,7 +53,8 @@ def main():
   longitudinal_supported = CP.openpilotLongitudinalControl and not CP.dashcamOnly
   profile = read_camera_profile(params) if longitudinal_supported else 0
   camera = CameraRuntime(profile, decel_limit_mps2=-A_CRUISE_MIN, jerk_limit_mps3=min(J_CRUISE_VALS),
-                         response_time_s=CRUISE_ACCEL_RESPONSE_TIME + delay) if profile and isfinite(delay) and delay >= 0.0 else None
+                         response_time_s=CRUISE_ACCEL_RESPONSE_TIME + delay,
+                         estimated_distance_sources={VEHICLE_SOURCE: STOCK_NAVI_DECEL_MPS2}) if profile and isfinite(delay) and delay >= 0.0 else None
   camera_events = messaging.sub_sock(CAMERA_EVENT_SERVICE) if camera is not None else None
   curve_supported = longitudinal_supported and isfinite(delay) and delay >= 0.0
   curve_preference = CurveSlowdownPreference(params) if curve_supported else None
@@ -98,7 +101,8 @@ def main():
         else:
           curve.invalidate()
       longitudinal_planner.update(sm, camera_speed_cap=camera_cap, camera_eligible=camera is not None and cruise_speed is not None,
-                                  curve_speed_cap=curve_cap, curve_eligible=curve_eligible, lead_restart=lead_restart, now_ns=now_ns)
+                                  curve_speed_cap=curve_cap, curve_eligible=curve_eligible, lead_restart=lead_restart, now_ns=now_ns,
+                                  camera_decel_mps2=camera.cap_decel_mps2 if camera is not None else None)
       longitudinal_planner.publish(sm, pm)
 
       ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])

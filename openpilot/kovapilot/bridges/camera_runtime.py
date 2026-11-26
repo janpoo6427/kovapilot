@@ -38,17 +38,21 @@ def camera_cruise_speed(sm, cruise_max_kph: float, cruise_unset_kph: float, kph_
 
 class CameraRuntime:
   def __init__(self, profile: int, *, decel_limit_mps2: float = PROFILE_ACCEL_MPS2, jerk_limit_mps3: float = PROFILE_JERK_MPS3,
-               response_time_s: float = 0.0):
+               response_time_s: float = 0.0, estimated_distance_sources: dict[str, float] | None = None):
     self.profile = profile
     self.policy = CameraShadow(profile, decel_limit_mps2=decel_limit_mps2, jerk_limit_mps3=jerk_limit_mps3,
-                               response_time_s=response_time_s)
+                               response_time_s=response_time_s, estimated_distance_sources=estimated_distance_sources)
     self.saturated = False
     self.motion: deque[tuple[int, float, float]] = deque()
+    # Deceleration the selected approach was planned with (None: no approach cap).
+    self.cap_decel_mps2: float | None = None
 
   def invalidate(self) -> None:
     self.policy = CameraShadow(self.profile, decel_limit_mps2=self.policy.decel_limit_mps2, jerk_limit_mps3=self.policy.jerk_limit_mps3,
-                               response_time_s=self.policy.response_time_s)
+                               response_time_s=self.policy.response_time_s,
+                               estimated_distance_sources=self.policy.estimated_distance_sources)
     self.motion.clear()
+    self.cap_decel_mps2 = None
 
   def _record_motion(self, now_ns: int, ego_mps: float) -> None:
     distance_m = 0.0
@@ -104,6 +108,7 @@ class CameraRuntime:
         return
 
   def speed_cap(self, now_ns: int, ego_mps: float, cruise_mps: float | None) -> float | None:
+    self.cap_decel_mps2 = None
     if self.saturated or cruise_mps is None or not isfinite(ego_mps) or ego_mps < 0:
       self.motion.clear()
       self.policy.approaches.clear()
@@ -112,4 +117,9 @@ class CameraRuntime:
     self._record_motion(now_ns, ego_mps)
     report = self.policy.observe(now_ns, ego_mps, cruise_mps, None, traveled_since=self._traveled_since)
     selected = report["selected_candidate"]
-    return selected["speed_mps"] if selected is not None else None
+    if selected is None:
+      return None
+    kind, _, source = selected["source"].partition(":")
+    if kind == "camera":
+      self.cap_decel_mps2 = self.policy.decel_limit(source)
+    return selected["speed_mps"]

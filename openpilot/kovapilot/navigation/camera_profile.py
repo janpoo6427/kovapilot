@@ -7,6 +7,10 @@ CAMERA_PROFILE_KEY = "navigation.speed_camera_profile"
 PROFILE_ACCEL_MPS2 = 1.2
 PROFILE_JERK_MPS3 = 0.8
 RECOVERY_ACCEL_MPS2 = {1: 0.35, 2: 0.55, 3: 0.8}
+# Stock navigation warnings carry no distance; the virtual distance (limit x 6 s) is too
+# short for the 0.5 m/s^2 cruise limit, so those approaches may plan up to carrot's
+# AutoNaviSpeedDecelRate default (1.20 m/s^2). App cameras keep the cruise limit.
+STOCK_NAVI_DECEL_MPS2 = 1.2
 
 
 @dataclass(frozen=True)

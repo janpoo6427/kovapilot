@@ -96,6 +96,7 @@ def vehicle_dependency_conditions(params) -> dict[str, str]:
     "openpilotCruiseSpeedOwner": openpilot_speed_owner,
     "stockCruiseSpeedOwner": stock_speed_owner,
     "acceleratorDisengagementOff": "unmet" if params.get_bool("DisengageOnAccelerator") else "met",
-    "verifiedCameraInput": "pendingConsumer",
+    # navcamd supplies verified camera points (carrot-compatible app, stock navigation CAN) once the car is known.
+    "verifiedCameraInput": "unknown" if supported is None else "met",
     "independentLateralControl": "pendingConsumer",
   }

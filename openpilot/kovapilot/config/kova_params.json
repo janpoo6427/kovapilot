@@ -110,7 +110,7 @@
       "risk": "control",
       "applyPolicy": "offroad",
       "savePolicy": "anytime",
-      "availability": "pendingConsumer"
+      "availability": "available"
     },
     {
       "key": "display.onroad_brightness_mode",

@@ -18,7 +18,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.kovapilot.bridges.camera_runtime import CAMERA_BATCH_LIMIT, CAMERA_EVENT_SERVICE, read_camera_profile
 from openpilot.kovapilot.navigation.carrot_link import DISCOVERY_PORT, NAVI_PORT, MAX_PACKET_BYTES, CarrotApp, EventTracker, \
   advertisement
-from openpilot.kovapilot.navigation.vehicle_navi import HDA_INFO_4A3_ADDR, NAVI_HU_ADDR, SIGNAL_TIMEOUT_NS, \
+from openpilot.kovapilot.navigation.vehicle_navi import HDA_INFO_4A3_ADDR, NAVI_HU_ADDR, SIGNAL_TIMEOUT_NS, VEHICLE_SOURCE, \
   VehicleCameraTracker, decode_hda_info_4a3, decode_navi_hu
 
 
@@ -47,7 +47,7 @@ class NavCamera:
   def __init__(self, signal: tuple[int, int] | None, *, is_metric: bool = True, session: str | None = None):
     session = session or secrets.token_hex(6)
     self.app = CarrotApp(EventTracker("carrot_app", session))
-    self.vehicle = VehicleCameraTracker("vehicle_navi", session)
+    self.vehicle = VehicleCameraTracker(VEHICLE_SOURCE, session)
     self.signal = signal
     self.is_metric = is_metric
     self.warning = None  # (mono ns, Warning)
