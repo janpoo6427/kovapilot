@@ -13,6 +13,9 @@ from openpilot.selfdrive.selfdrived.events import ET
 IGNORED_MODES = (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput)
 ButtonType = car.CarState.ButtonEvent.Type
 MANUAL_SELECTION_BUTTONS = (ButtonType.cancel, ButtonType.lkas, ButtonType.mainCruise)
+# The saved preference is re-read while driving. Turning it off stops any later
+# automatic start at once; turning it on only arms the next departure from Park.
+PREFERENCE_POLL_NS = 1_000_000_000
 
 
 def has_control_authority(cp, pandas) -> bool:
@@ -49,10 +52,12 @@ class AutoEngageRuntime:
     self.policy = AutoEngage(seen_session=True)
     self.last_publish = 0
     self.last_status: tuple[str, str] | None = None
+    self.next_preference_read = 0
 
   def _start_session(self, session: int, now_ns: int) -> None:
     self.session = session
     self.requested = read_auto_engage(self.params)
+    self.next_preference_read = now_ns + PREFERENCE_POLL_NS
     try:
       self.initial_cruise_speed = max(V_CRUISE_INITIAL, self.params.get("InitialCruiseSpeedKph", return_default=True))
       prior = read_auto_engage_status()
@@ -74,6 +79,9 @@ class AutoEngageRuntime:
       return False
     if device.startedMonoTime != self.session:
       self._start_session(device.startedMonoTime, now_ns)
+    elif now_ns >= self.next_preference_read:
+      self.requested = read_auto_engage(self.params)
+      self.next_preference_read = now_ns + PREFERENCE_POLL_NS
 
     request = False
     if not self.supported:

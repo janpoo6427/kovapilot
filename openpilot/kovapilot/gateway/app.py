@@ -135,7 +135,8 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
       else:
         setting["appliedValue"] = auto_engage["value"]
         if auto_engage["lateral"] != "unsupported" or auto_engage["longitudinal"] != "unsupported":
-          setting["applyState"] = "applied" if auto_engage["value"] == setting["value"] else "pendingRestart"
+          # selfdrived re-reads the preference about once a second.
+          setting["applyState"] = "applied" if auto_engage["value"] == setting["value"] else "applying"
         setting["runtimeStates"] = [
           {"title": {"ko": "조향", "en": "Steering"}, "state": auto_engage["lateral"]},
           {"title": {"ko": "크루즈", "en": "Cruise"}, "state": auto_engage["longitudinal"]},

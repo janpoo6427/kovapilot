@@ -59,6 +59,13 @@ response reports the running process's acknowledged value separately, with
 `applyState` set to `applied`, `pendingRestart`, or `awaitingStart`.
 Saving never restarts the process.
 
+`engagement.auto_engage` can be saved while driving. `selfdrived` re-reads it
+about once a second: turning it off stops any later automatic start at once,
+and turning it on arms the next departure from Park. The Gateway reports the
+value `selfdrived` last published as `appliedValue`, `applyState: applying`
+until it matches, and per-axis `runtimeStates`. It works only with openpilot
+longitudinal control applied.
+
 `cruise.curve_slowdown` defaults to `0` (off) and uses `1` for on. On a
 supported vehicle, authorized users can save the preference while openpilot
 longitudinal control is off. The Gateway reports `awaitingLongitudinal` until

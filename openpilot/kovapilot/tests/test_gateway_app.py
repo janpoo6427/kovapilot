@@ -36,22 +36,20 @@ async def _with_client(test_case, *, is_offroad=True):
     await test_case(client)
 
 
-def test_auto_engage_is_saved_only_in_park_and_shows_both_axes():
-  parked = False
+def test_auto_engage_is_saved_while_driving_and_shows_both_axes():
+  # janpoo 11/27: selfdrived re-reads the preference about once a second, so it is
+  # saved while driving (previously Park only) and reports "applying" until acknowledged.
   observed = {"value": 0, "lateral": "off", "longitudinal": "off"}
-  app = create_app(KovaParamsStore(MemoryBackend()), lambda: False, parked_provider=lambda: parked,
+  app = create_app(KovaParamsStore(MemoryBackend()), lambda: False, parked_provider=lambda: False,
                    applied_auto_engage_provider=lambda: observed)
 
   async def check():
-    nonlocal parked
     data = {"key": AUTO_ENGAGE_KEY, "value": 1, "expectedRevision": 0}
     async with TestClient(TestServer(app)) as client:
-      assert (await client.post("/v1/kova-params/update", json=data)).status == 403
-      parked = True
       response = await client.post("/v1/kova-params/update", json=data)
       assert response.status == 200
       item = next(s for s in (await response.json())["settings"] if s["key"] == AUTO_ENGAGE_KEY)
-      assert item["applyState"] == "pendingRestart"
+      assert item["applyState"] == "applying"
       observed.update(value=1, lateral="paused", longitudinal="active")
       response = await client.get("/v1/kova-params")
       item = next(s for s in (await response.json())["settings"] if s["key"] == AUTO_ENGAGE_KEY)
