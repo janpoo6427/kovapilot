@@ -32,6 +32,26 @@ setting follows its save and apply policies. Git maintenance uses the
 authorized updater workflow below.
 Use a network whose members you trust.
 
+### Owner phone
+
+Git apply, device restart and Tailscale need the owner phone. On automatic
+Wi-Fi, register it from KovaLink with the vehicle off: **장치 연결 → 소유자로
+등록** asks the comma for a code (`POST /v1/owner/pair`). The comma shows a
+six-digit code as an offroad alert for two minutes. Typing it in KovaLink
+(`POST /v1/owner/confirm`) returns a new owner token once. The Gateway keeps
+only its SHA-256 in `owner.sha256` next to the automatic TLS identity.
+
+The owner phone sends `Authorization: Bearer <token>` on every request. Other
+phones on the subnet keep the automatic access above without a header. A
+request that sends a wrong or replaced owner token gets 401. Five wrong codes
+end the code. Pairing again with a new code from the comma screen replaces
+the previous owner.
+
+`GET /v1/health` on Wi-Fi also reports `owner` (this request is from the
+owner), `ownerRegistered` and `ownerPairing` (the code flow is available).
+With the bearer setup below, the provisioned token is the owner token and
+code pairing is unavailable.
+
 Settings with `savePolicy: anytime` accept authorized saves independently of
 ignition and gear. Brightness and stock ACC diagnostics are live. Cruise
 accelerator sync takes its saved value when `card` starts. The settings
@@ -135,6 +155,8 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | Endpoint | Contract |
 | --- | --- |
 | `GET /v1/health` | Gateway version and connection scope |
+| `POST /v1/owner/pair` | Automatic Wi-Fi, offroad: show a six-digit owner code on the comma |
+| `POST /v1/owner/confirm` | `{"code"}` from the comma screen; returns the owner token once |
 | `GET /v1/kova-params` | Settings document and device state |
 | `POST /v1/kova-params/update` | Revision-checked settings update |
 | `WS /v1/telemetry` | Flat scene JSON at up to 20 Hz when a fresh carState is available |

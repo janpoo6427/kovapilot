@@ -27,6 +27,7 @@ from openpilot.kovapilot.gateway.device_restart import DeviceRestart, RestartBlo
 from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
+from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, PairingBlocked, PairingBusy, PairingCodeInvalid, PairingExpired
 from openpilot.kovapilot.gateway.setting_dependencies import evaluate_dependencies
 
 
@@ -48,6 +49,7 @@ GIT_KEY = web.AppKey("git", GitRepository)
 GIT_LOCK_KEY = web.AppKey("git_lock", asyncio.Lock)
 NATIVE_LONGITUDINAL = web.AppKey("native_longitudinal", NativeLongitudinal)
 RESTART_KEY = web.AppKey("restart", DeviceRestart)
+OWNER_PAIRING_KEY = web.AppKey("owner_pairing", OwnerPairing)
 
 
 class OffroadProvider(Protocol):
@@ -58,9 +60,14 @@ def _error(status: int, code: str, message: str) -> web.Response:
   return web.json_response({"error": {"code": code, "message": message}}, status=status)
 
 
+def _is_owner(request: web.Request) -> bool:
+  access = request.app.get(LAN_ACCESS_KEY)
+  return bool(request.secure and access is not None and access.is_owner(request.headers.getall("Authorization", [])))
+
+
 def _allowed_write_risks(request: web.Request) -> frozenset[str] | None:
   access = request.app.get(LAN_ACCESS_KEY)
-  if request.secure and access is not None and access.token_digest is None:
+  if request.secure and access is not None and access.token_digest is None and not _is_owner(request):
     return LOCAL_NETWORK_WRITE_RISKS
   return None
 
@@ -151,12 +158,18 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
 
 
 async def health(request: web.Request) -> web.Response:
-  return web.json_response({
+  body = {
     "status": "ok",
     "schemaVersion": API_SCHEMA_VERSION,
     "bindScope": "wifi" if request.secure else "loopback",
     "authentication": request.app[LAN_ACCESS_KEY].authentication if request.secure else "localProcessOnly",
-  })
+  }
+  if request.secure:
+    access = request.app[LAN_ACCESS_KEY]
+    pairing = request.app.get(OWNER_PAIRING_KEY)
+    body.update(owner=_is_owner(request), ownerRegistered=access.owner_secret is not None,
+                ownerPairing=pairing is not None and pairing.available)
+  return web.json_response(body)
 
 
 async def get_kova_params(request: web.Request) -> web.Response:
@@ -239,6 +252,11 @@ async def local_client(request, handler):
       response = _error(401, "authentication_required", "valid Gateway credentials are required")
       response.headers["WWW-Authenticate"] = "Bearer"
       return response
+    if access.token_digest is None and auth and not access.is_owner(auth):
+      # A phone that pairs again replaces the owner; the old token must fail loudly.
+      response = _error(401, "authentication_required", "the owner token is not valid for this device")
+      response.headers["WWW-Authenticate"] = "Bearer"
+      return response
     return await handler(request)
   if request.remote not in ("127.0.0.1", "::1") or request.headers.get("Origin") is not None:
     return _error(403, "local_client_required", "only native loopback clients are supported")
@@ -310,8 +328,55 @@ async def stream_offer(request):
 
 
 def _git_authorized(request):
-  access = request.app.get(LAN_ACCESS_KEY)
-  return not request.secure or (access is not None and access.token_digest is not None)
+  return not request.secure or _is_owner(request)
+
+
+def _pairing(request) -> OwnerPairing | None:
+  pairing = request.app.get(OWNER_PAIRING_KEY)
+  return pairing if request.secure and pairing is not None and pairing.available else None
+
+
+async def owner_pair(request):
+  pairing = _pairing(request)
+  if pairing is None:
+    return _error(404, "owner_pairing_unavailable", "owner pairing needs automatic Wi-Fi access")
+  try:
+    seconds = await asyncio.to_thread(pairing.start)
+  except PairingBlocked:
+    return _error(409, "owner_pairing_offroad", "turn the vehicle off to pair a phone")
+  except PairingBusy:
+    return _error(429, "owner_pairing_busy", "a pairing code was just requested")
+  except OSError:
+    return _error(503, "owner_pairing_unavailable", "the device could not show a pairing code")
+  asyncio.get_running_loop().call_later(seconds, pairing.expire)
+  return web.json_response({"expiresIn": seconds}, headers={"Cache-Control": "no-store"})
+
+
+async def owner_confirm(request):
+  pairing = _pairing(request)
+  if pairing is None:
+    return _error(404, "owner_pairing_unavailable", "owner pairing needs automatic Wi-Fi access")
+  try:
+    body = await request.json()
+  except (ValueError, TypeError):
+    body = None
+  if not isinstance(body, dict) or set(body) != {"code"} or not isinstance(body["code"], str) or \
+     re.fullmatch(r"[0-9]{6}", body["code"]) is None:
+    return _error(400, "invalid_request", "expected a six digit code")
+  try:
+    token = await asyncio.to_thread(pairing.confirm, body["code"])
+  except PairingBlocked:
+    return _error(409, "owner_pairing_offroad", "turn the vehicle off to pair a phone")
+  except PairingExpired:
+    return _error(410, "owner_pairing_expired", "request a new code on the device")
+  except PairingCodeInvalid as exc:
+    response = _error(403, "owner_pairing_code_invalid", "the code does not match")
+    body = {"error": {"code": "owner_pairing_code_invalid", "message": "the code does not match",
+                      "remainingAttempts": exc.remaining}}
+    return web.json_response(body, status=response.status)
+  except (OSError, ValueError):
+    return _error(503, "owner_pairing_unavailable", "the device could not save the owner")
+  return web.json_response({"token": token}, headers={"Cache-Control": "no-store"})
 
 
 async def git_api(request):
@@ -398,7 +463,7 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
                applied_auto_engage_provider: Callable[[], dict | None] | None = None,
                dependency_conditions: Callable[[], dict[str, str]] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None,
-               restart=None) -> web.Application:
+               restart=None, owner_pairing=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
@@ -429,6 +494,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[NATIVE_LONGITUDINAL] = native_longitudinal
   if restart is not None:
     app[RESTART_KEY] = restart
+  if owner_pairing is not None:
+    app[OWNER_PAIRING_KEY] = owner_pairing
   app.on_shutdown.append(close_sockets)
   app.router.add_get("/v1/health", health)
   app.router.add_get("/v1/kova-params", get_kova_params)
@@ -439,4 +506,6 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
   app.router.add_post("/v1/git/{action:plan|switch|reset}", git_api)
   app.router.add_post("/v1/git/apply", git_apply)
   app.router.add_post("/v1/device/restart", device_restart)
+  app.router.add_post("/v1/owner/pair", owner_pair)
+  app.router.add_post("/v1/owner/confirm", owner_confirm)
   return app

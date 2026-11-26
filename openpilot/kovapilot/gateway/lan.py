@@ -10,8 +10,10 @@ import re
 import signal
 import socket
 import ssl
+from contextlib import suppress
 import stat
 import struct
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,16 +26,54 @@ SIOCGIFFLAGS = 0x8913
 SIOCGIFADDR = 0x8915
 SIOCGIFNETMASK = 0x891B
 IFF_UP_RUNNING = 0x1 | 0x40
+OWNER_FILE = "owner.sha256"
+TOKEN_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass
 class LanAccess:
   token_digest: bytes | None
   address: ipaddress.IPv4Interface | None = None
+  # Automatic Wi-Fi only: the phone registered with a code shown on the comma.
+  owner_digest: bytes | None = None
+  owner_file: Path | None = None
 
   @property
   def authentication(self) -> str:
     return "localNetwork" if self.token_digest is None else "bearer"
+
+  @property
+  def owner_secret(self) -> bytes | None:
+    """Digest of the owner's bearer token: the provisioned one, else the paired phone's."""
+    return self.token_digest if self.token_digest is not None else self.owner_digest
+
+  def is_owner(self, authorization: list[str]) -> bool:
+    secret = self.owner_secret
+    if secret is None or len(authorization) != 1:
+      return False
+    scheme, _, token = authorization[0].partition(" ")
+    if scheme.lower() != "bearer" or TOKEN_PATTERN.fullmatch(token) is None:
+      return False
+    return hmac.compare_digest(hashlib.sha256(token.encode("ascii")).digest(), secret)
+
+  def set_owner(self, token: str) -> None:
+    """Replace the paired owner. The token itself is never stored."""
+    if self.token_digest is not None or self.owner_file is None or TOKEN_PATTERN.fullmatch(token) is None:
+      raise ValueError("owner pairing needs automatic Wi-Fi access and a 64 hex token")
+    digest = hashlib.sha256(token.encode("ascii")).digest()
+    fd, temporary = tempfile.mkstemp(dir=self.owner_file.parent, prefix=".owner.")
+    try:
+      with os.fdopen(fd, "w", encoding="ascii") as handle:
+        handle.write(digest.hex() + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+      os.chmod(temporary, 0o600)
+      os.replace(temporary, self.owner_file)
+    except BaseException:
+      with suppress(FileNotFoundError):
+        os.unlink(temporary)
+      raise
+    self.owner_digest = digest
 
   def accepts_peer(self, local: str, remote: str) -> bool:
     if self.address is None or local != str(self.address.ip):
@@ -75,7 +115,22 @@ def load_lan_config(directory: Path, *, require_token: bool = True) -> tuple[Lan
   context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
   context.minimum_version = ssl.TLSVersion.TLSv1_2
   context.load_cert_chain(directory / "server.pem", directory / "server.key", password="")
-  return LanAccess(token_digest), context
+  if require_token:
+    return LanAccess(token_digest), context
+  owner_file = directory / OWNER_FILE
+  return LanAccess(None, owner_digest=read_owner_digest(owner_file), owner_file=owner_file), context
+
+
+def read_owner_digest(path: Path) -> bytes | None:
+  """A damaged or loosely owned record means no owner; Wi-Fi stays up and the phone pairs again."""
+  try:
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+      return None
+    digest = path.read_text(encoding="ascii").strip()
+  except (OSError, UnicodeDecodeError):
+    return None
+  return bytes.fromhex(digest) if TOKEN_PATTERN.fullmatch(digest) else None
 
 
 def wifi_address() -> ipaddress.IPv4Interface | None:

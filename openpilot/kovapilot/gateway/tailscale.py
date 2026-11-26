@@ -122,8 +122,7 @@ class Tailscale:
     await self._command("up", "--accept-dns=false", "--accept-routes=false", "--timeout=180s", deadline=185)
 
   def _has_owner_token(self, request: web.Request) -> bool:
-    auth = request.headers.getall("Authorization", [])
-    return len(auth) == 1 and self.access.authenticates(auth[0])
+    return self.access.is_owner(request.headers.getall("Authorization", []))
 
   async def manage(self, request: web.Request) -> web.Response:
     if not request.secure or request.app.get(LAN_ACCESS_KEY) is not self.access or not self._has_owner_token(request):
@@ -148,9 +147,9 @@ class Tailscale:
   async def _snapshot(self, request: web.Request) -> web.Response:
     auth = request.headers.getall("Authorization", [])
     if (request.remote != "127.0.0.1" or self.current["state"] != "connected" or "Origin" in request.headers
-        or self.access.token_digest is None or len(auth) != 1):
+        or (owner := self.access.owner_secret) is None or len(auth) != 1):
       raise web.HTTPForbidden()
-    read_token = hmac.digest(self.access.token_digest, READ_TOKEN_CONTEXT, "sha256").hex()
+    read_token = hmac.digest(owner, READ_TOKEN_CONTEXT, "sha256").hex()
     if not auth[0].isascii() or not hmac.compare_digest(auth[0], f"Bearer {read_token}"):
       raise web.HTTPForbidden()
     info = await asyncio.to_thread(self.device_info)

@@ -48,6 +48,7 @@ def main() -> None:
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
   from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
   from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
+  from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, show_pairing_code
   from openpilot.kovapilot.gateway.tailscale import Tailscale
   from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
@@ -67,6 +68,9 @@ def main() -> None:
   def is_offroad() -> bool:
     return device_state_params.get_bool("IsOffroad")
 
+  owner_pairing = None
+  if not PC and lan is not None and lan[0].token_digest is None:
+    owner_pairing = OwnerPairing(lan[0], is_offroad, partial(show_pairing_code, device_state_params))
   app = create_app(
     store, is_offroad,
     parked_provider=telemetry.is_parked_and_disengaged, applied_cruise_provider=telemetry.applied_cruise_sync,
@@ -87,8 +91,9 @@ def main() -> None:
     lan_access=lan[0] if lan else None,
     restart=DeviceRestart(partial(restart_allowed, device_state_params, PC),
                           lambda: device_state_params.put_bool(REBOOT_KEY, True, block=True)),
+    owner_pairing=owner_pairing,
   )
-  if not PC and lan is not None and lan[0].token_digest is not None:
+  if not PC and lan is not None:
     Tailscale(provisioned.parent / "tailscale", lan[0], is_offroad, telemetry, vpn_device_info).attach(app)
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
