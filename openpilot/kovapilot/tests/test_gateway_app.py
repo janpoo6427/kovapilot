@@ -219,7 +219,7 @@ def test_same_subnet_can_save_control_preferences_without_a_token(tmp_path, monk
         assert settings[CURVE_SLOWDOWN_KEY]["appliedValue"] == 0
 
         _, settings = await save("steering.always_on", 1, 2)
-        assert settings["steering.always_on"]["applyStatus"] == "pendingConsumer"
+        assert settings["steering.always_on"]["applyStatus"] == "available"
         assert "appliedValue" not in settings["steering.always_on"]
         _, settings = await save("display.onroad_brightness_fixed", 65, 3)
         assert settings["display.onroad_brightness_fixed"]["value"] == 65
@@ -446,12 +446,12 @@ def test_updates_setting_with_authoritative_offroad_state():
     assert response.status == 200
     assert document["revision"] == 1
     assert document["settings"][0]["value"] == 1
-    assert document["settings"][0]["applyStatus"] == "pendingConsumer"
+    assert document["settings"][0]["applyStatus"] == "available"
 
   asyncio.run(_with_client(test_case))
 
 
-def test_saves_pending_consumer_while_onroad():
+def test_saves_always_on_steering_while_onroad_for_the_next_start():
   async def test_case(client):
     response = await client.post("/v1/kova-params/update", json={
       "key": "steering.always_on",
@@ -460,7 +460,8 @@ def test_saves_pending_consumer_while_onroad():
     })
     assert response.status == 200
     setting = next(s for s in (await response.json())["settings"] if s["key"] == "steering.always_on")
-    assert setting["applyStatus"] == "pendingConsumer"
+    assert setting["applyStatus"] == "available"
+    assert setting["applyPolicy"] == "restart"
     assert setting["value"] == 1
 
   asyncio.run(_with_client(test_case, is_offroad=False))

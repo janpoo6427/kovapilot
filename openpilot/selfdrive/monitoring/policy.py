@@ -440,7 +440,8 @@ class DriverMonitoring:
       rpyCalib = [0., 0., 0.]
     else:
       car_speed = sm['carState'].vEgo
-      enabled = sm['selfdriveState'].enabled
+      # KOVA always-on lateral steers without openpilot engaged and is monitored the same way
+      enabled = sm['selfdriveState'].enabled or sm['selfdriveState'].alwaysOnLateralEngaged
       wrong_gear = sm['carState'].gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low)
       lowspeed = car_speed < self.settings._ALERT_MIN_SPEED
       driver_engaged = sm['carState'].steeringPressed or sm['carState'].gasPressed

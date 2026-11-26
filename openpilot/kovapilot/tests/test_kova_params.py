@@ -43,8 +43,9 @@ def test_bundled_catalog_defines_safe_always_steering_sample():
   assert setting["title"] == {"ko": "항시 조향", "en": "Always-on steering"}
   assert setting["defaultValue"] == 0
   assert setting["risk"] == "control"
-  assert setting["applyPolicy"] == "offroad"
-  assert setting["availability"] == "pendingConsumer"
+  assert setting["applyPolicy"] == "restart"
+  assert setting["savePolicy"] == "anytime"
+  assert setting["availability"] == "available"
 
 
 def test_document_merges_defaults_without_writing_storage():
@@ -53,7 +54,7 @@ def test_document_merges_defaults_without_writing_storage():
 
   assert document["revision"] == 0
   assert document["settings"][0]["value"] == 0
-  assert document["settings"][0]["applyStatus"] == "pendingConsumer"
+  assert document["settings"][0]["applyStatus"] == "available"
   assert backend.put_calls == []
 
 
@@ -124,7 +125,7 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
 
   assert document["revision"] == 1
   assert document["settings"][0]["value"] == 1
-  assert document["settings"][0]["applyStatus"] == "pendingConsumer"
+  assert document["settings"][0]["applyStatus"] == "available"
   assert backend.value == {
     "schemaVersion": 1,
     "revision": 1,
@@ -143,7 +144,9 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
 def test_onroad_update_is_rejected_without_write():
   backend = MemoryBackend()
   catalog = load_bundled_catalog()
-  next(s for s in catalog["settings"] if s["key"] == "steering.always_on").pop("savePolicy")
+  sample = next(s for s in catalog["settings"] if s["key"] == "steering.always_on")
+  sample.pop("savePolicy")
+  sample["applyPolicy"] = "offroad"
 
   with pytest.raises(KovaParamsApplyPolicyError, match="offroad"):
     KovaParamsStore(backend, catalog).update("steering.always_on", 1, 0, is_offroad=False)

@@ -65,6 +65,21 @@ def _vehicle_longitudinal_state(params) -> tuple[bool | None, bool, bool | None]
   return None, False, None
 
 
+def _independent_lateral_state(params) -> str:
+  from capnp import KjException
+  from opendbc.car.structs import car
+  from openpilot.kovapilot.vehicle.always_lateral import always_on_lateral_supported
+
+  raw = params.get("CarParams")
+  if raw is not None:
+    try:
+      with car.CarParams.from_bytes(raw) as cp:
+        return "met" if always_on_lateral_supported(cp) else "unsupported"
+    except (ValueError, KjException):
+      pass
+  return "unknown"
+
+
 def vehicle_capability(params) -> tuple[bool | None, bool]:
   if params.get_bool("IsReleaseBranch"):
     return False, False
@@ -98,5 +113,5 @@ def vehicle_dependency_conditions(params) -> dict[str, str]:
     "acceleratorDisengagementOff": "unmet" if params.get_bool("DisengageOnAccelerator") else "met",
     # navcamd supplies verified camera points (carrot-compatible app, stock navigation CAN) once the car is known.
     "verifiedCameraInput": "unknown" if supported is None else "met",
-    "independentLateralControl": "pendingConsumer",
+    "independentLateralControl": _independent_lateral_state(params),
   }

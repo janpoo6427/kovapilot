@@ -15,7 +15,7 @@ The catalog is `openpilot/kovapilot/config/kova_params.json` and follows `kova_p
 - Bundled settings use numeric values. `enum` settings declare unique integer `options` and may declare localized `optionTitles`. Options `[0, 1]` with `"control": "switch"` render as a switch in KovaLink. Values match the exact JSON type.
 - Optional `dependencies` describe prerequisites. A stored setting dependency uses `setting` and `equals`. A device condition uses `condition`, with an optional `setting` linking to the related preference. Each entry has a localized `title`.
 
-The first sample is `steering.always_on` (`항시 조향`). It defaults to `0`, can only be changed offroad, and reports `pendingConsumer`. A vehicle-capability consumer must exist before the setting can affect steering.
+The first sample is `steering.always_on` (`항시 조향`). It defaults to `0`, can be saved anytime and applies from the next start: card sets `ALT_EXP_ALWAYS_ON_LATERAL` (1024) in `CarParams.alternativeExperience` on supported Hyundai/Kia/Genesis vehicles, panda safety then allows lateral control after a driver engagement without cruise (never while braking, at standstill or with invalid RX checks), and selfdrived runs `kovapilot/bridges/always_lateral_runtime.py`.
 
 ## Persistent state
 

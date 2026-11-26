@@ -130,6 +130,9 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     excessiveActuation @96;
     bigModelLoading @100;
     bigModelFailed @102;
+    alwaysLateralEngaged @106;
+    alwaysLateralDisengaged @107;
+    alwaysLateralUnavailable @108;
 
     lowBatteryDEPRECATED @40;
     soundsUnavailableDEPRECATED @47;
@@ -828,6 +831,10 @@ struct SelfdriveState {
 
   # configurable driving settings
   personality @11 :LongitudinalPersonality;
+
+  # KOVA always-on lateral (steering.always_on): engaged once requested, active while it may steer
+  alwaysOnLateralEngaged @14 :Bool;
+  alwaysOnLateralActive @15 :Bool;
 
   enum AudibleAlert {
     none @0;

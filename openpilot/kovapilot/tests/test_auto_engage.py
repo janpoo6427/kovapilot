@@ -47,6 +47,7 @@ class SelfdriveStep:
     self.sd.CP, self.sd.sm = cp, sm
     self.sd.params = params
     self.sd.auto_engage = AutoEngageRuntime(cp, params)
+    self.sd.always_lateral = None
     self.sd.initialized = True
     self.sd.enabled = self.sd.active = False
     self.sd.state_machine = StateMachine()

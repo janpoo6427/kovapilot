@@ -1012,6 +1012,31 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },
 
+  # KOVA always-on lateral: steering assist without openpilot engaged
+  EventName.alwaysLateralEngaged: {
+    ET.PERMANENT: Alert(
+      "Always-on Steering Active",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 2.),
+  },
+
+  EventName.alwaysLateralDisengaged: {
+    ET.PERMANENT: Alert(
+      "Always-on Steering Off",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 2.),
+  },
+
+  EventName.alwaysLateralUnavailable: {
+    ET.PERMANENT: Alert(
+      "TAKE CONTROL",
+      "Always-on Steering Off",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.steerRequired, AudibleAlert.warningSoft, 2.),
+  },
+
   EventName.userBookmarkNotPaired: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", "pair to connect\nto view", duration=1.5),
   },

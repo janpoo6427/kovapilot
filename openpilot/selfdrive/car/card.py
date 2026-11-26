@@ -14,6 +14,7 @@ from openpilot.common.swaglog import cloudlog, ForwardingHandler
 from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAcceleratorSyncBridge
 from openpilot.kovapilot.config.cruise_sync_settings import publish_applied_cruise_sync, read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
+from openpilot.kovapilot.vehicle.always_lateral import apply_always_on_lateral, read_always_on_steering
 
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -119,6 +120,9 @@ class Car:
       safety_config = structs.CarParams.SafetyConfig()
       safety_config.safetyModel = structs.CarParams.SafetyModel.noOutput
       self.CP.safetyConfigs = [safety_config]
+
+    # always-on lateral (steering.always_on) is chosen once per session, before pandad sets panda safety
+    apply_always_on_lateral(self.CP, read_always_on_steering(KovaParamsStore(ParamsKovaParamsBackend(self.params))))
 
     if self.CP.secOcRequired:
       # Copy user key if available

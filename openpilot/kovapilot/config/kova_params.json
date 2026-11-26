@@ -50,14 +50,14 @@
       "defaultValue": 0,
       "title": {"ko": "항시 조향", "en": "Always-on steering"},
       "description": {
-        "ko": "지원되는 차량과 안전 조건에서 종방향 크루즈 상태와 독립적으로 조향 보조를 사용할 수 있도록 요청합니다. 실제 적용에는 별도의 차량 기능 소비자와 안전 검증이 필요합니다.",
-        "en": "Requests steering assistance independently of longitudinal cruise state when vehicle support and safety conditions allow. Activation requires a separate vehicle-capability consumer and safety validation."
+        "ko": "지원 차량(현대·기아·제네시스)에서 크루즈를 한 번 켜거나 LFA 버튼(CAN FD 차량)을 누르면 크루즈가 꺼져도 조향 보조를 이어 갑니다. 브레이크를 밟는 동안, 핸들을 직접 돌리는 동안, 정차 중에는 멈췄다가 다시 이어 가고, LFA 버튼을 다시 누르거나 P·R 단으로 바꾸거나 고장이 나면 꺼집니다. 다음 시동부터 적용됩니다.",
+        "en": "On supported vehicles (Hyundai, Kia, Genesis), steering assist continues after cruise turns off once cruise was engaged or the LFA button was pressed (CAN FD vehicles). It pauses while braking, while you steer, and at standstill, and turns off with the LFA button, in P or R, or on a fault. Applies from the next start."
       },
       "access": "readWrite",
       "risk": "control",
-      "applyPolicy": "offroad",
+      "applyPolicy": "restart",
       "savePolicy": "anytime",
-      "availability": "pendingConsumer",
+      "availability": "available",
       "requiredCapabilities": ["alwaysSteering"]
     },
     {
