@@ -12,9 +12,10 @@ Read `D:\kova\AGENTS.md` and the linked Vault rules before working in this repos
 
 ## Safety boundary
 
-- Do not alter panda/opendbc safety, CAN actuation, steering, braking, acceleration commands, or engagement behavior without an approved safety task packet.
-- New control behavior must default off and progress through unit/contract tests, simulation or replay, and explicit device/vehicle gates.
-- Analyze behavior from current source. Fork behavior is reference material, not a correctness oracle.
+- Proceed with code changes and local verification within the scope explicitly requested or approved by the user. Do not request the same approval again.
+- For changes that affect vehicle control, record the scope, affected safeguards and disengagement paths, and verification results in the Vault work note.
+- Follow `10-Rules/SAFETY_AND_EVIDENCE.md` for verification and device installation requirements. Push changes, install updates on the comma device, reboot it, or enable vehicle control only within the scope authorized by the user.
+- Do not modify AGENTS.md unless explicitly authorized to do so.
 
 ## Required project references
 
