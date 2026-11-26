@@ -9,7 +9,7 @@ from openpilot.kovapilot.config.driver_monitoring import (DRIVER_MONITORING_CONF
                                                           DriverMonitoringDisableReason, disable_reason)
 from openpilot.kovapilot.config.parked_setting import parked_for_settings, stopped_in_park
 from openpilot.kovapilot.engagement.dm_session_disable import (DriverMonitoringSessionGesture,
-                                                               SessionDisableContext)
+                                                               SessionDisableContext, toggled_session_disabled)
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring
 
 
@@ -59,8 +59,12 @@ def dmonitoringd_thread():
         disable_reason=reason,
       )
       if session_gesture.update(context, buttons):
-        params.put_bool(SESSION_DISABLED_PARAM, True)
-        reason = DriverMonitoringDisableReason.SESSION
+        disabled = toggled_session_disabled(reason)
+        params.put_bool(SESSION_DISABLED_PARAM, disabled)
+        reason = DriverMonitoringDisableReason.SESSION if disabled else DriverMonitoringDisableReason.NONE
+        if not disabled:
+          # Monitoring resumes from a fresh state, not from before it was turned off.
+          DM = DriverMonitoring(rhd_saved=params.get_bool("IsRhdDetected"), always_on=params.get_bool("AlwaysOnDM"))
         break
 
     if rk.frame % 40 == 0:

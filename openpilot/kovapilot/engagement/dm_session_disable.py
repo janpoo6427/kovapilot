@@ -35,7 +35,9 @@ class DriverMonitoringSessionGesture:
     self.sequence.reset()
 
   def allowed(self, context: SessionDisableContext) -> bool:
-    return (context.disable_reason == DriverMonitoringDisableReason.NONE and
+    # The same gesture turns monitoring off (NONE) and back on (SESSION).
+    # A build-level disable cannot be changed at runtime.
+    return (context.disable_reason in (DriverMonitoringDisableReason.NONE, DriverMonitoringDisableReason.SESSION) and
             self.config.allow_session_disable_gesture and
             context.parked and
             context.selfdrive_valid and
@@ -55,3 +57,10 @@ class DriverMonitoringSessionGesture:
       return False
 
     return self.sequence.update(context.event_time, buttons)
+
+
+def toggled_session_disabled(reason: DriverMonitoringDisableReason) -> bool:
+  """Value to store in SESSION_DISABLED_PARAM after a completed gesture."""
+  if reason == DriverMonitoringDisableReason.BUILD_CONFIG:
+    raise ValueError("build-level disable cannot be toggled")
+  return reason == DriverMonitoringDisableReason.NONE

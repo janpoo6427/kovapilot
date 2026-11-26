@@ -21,8 +21,10 @@ class DriverMonitoringConfig:
   cancel_echo_window_seconds: float = 0.15
 
 
-# Persistent disabling is deliberately a source-level decision. It must not be
-# exposed through Params, profiles, remote settings, or the on-device UI.
+# Turning monitoring off for every build is a source-level decision. The only runtime
+# switch is the parked three-cancel gesture: it toggles SESSION_DISABLED_PARAM, which
+# stays set across ignition cycles and reboots until the same gesture turns monitoring
+# back on. It must not be exposed through profiles, remote settings, or the on-device UI.
 DRIVER_MONITORING_ENABLED = True
 ALLOW_SESSION_DISABLE_GESTURE = True
 
