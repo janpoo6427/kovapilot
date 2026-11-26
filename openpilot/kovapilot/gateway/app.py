@@ -14,6 +14,7 @@ from aiohttp import ClientError, web
 from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
   CURVE_SLOWDOWN_KEY,
+  LEAD_RESTART_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsReadOnlyError,
   KovaParamsRevisionConflict,
@@ -35,6 +36,7 @@ OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
 APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], int | None])
 APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], int | str | None])
+APPLIED_LEAD_RESTART_PROVIDER_KEY = web.AppKey("applied_lead_restart_provider", Callable[[], int | None])
 DEPENDENCY_CONDITIONS_KEY = web.AppKey("dependency_conditions", Callable[[], dict[str, str]])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
 SOCKETS_KEY = web.AppKey("telemetry_sockets", set)
@@ -80,6 +82,10 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
     elif setting["key"] == CURVE_SLOWDOWN_KEY and applied_curve is not None:
       provider = applied_curve
       setting["applyStatus"] = "available"
+    elif setting["key"] == LEAD_RESTART_KEY:
+      provider = request.app.get(APPLIED_LEAD_RESTART_PROVIDER_KEY)
+      if provider is None:
+        setting["applyState"] = "awaitingStart"
     if provider is not None:
       applied = provider()
       if applied == "unsupported":
@@ -331,6 +337,7 @@ async def git_apply(request):
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
+               applied_lead_restart_provider: Callable[[], int | None] | None = None,
                dependency_conditions: Callable[[], dict[str, str]] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
@@ -342,6 +349,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[APPLIED_CRUISE_PROVIDER_KEY] = applied_cruise_provider
   if applied_curve_provider is not None:
     app[APPLIED_CURVE_PROVIDER_KEY] = applied_curve_provider
+  if applied_lead_restart_provider is not None:
+    app[APPLIED_LEAD_RESTART_PROVIDER_KEY] = applied_lead_restart_provider
   if dependency_conditions is not None:
     app[DEPENDENCY_CONDITIONS_KEY] = dependency_conditions
   app[SOCKETS_KEY] = set()

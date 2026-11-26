@@ -7,6 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, CURVE_SLOWDOWN_KEY, KOVA_PARAMS_KEY, KovaParamsStore
+from openpilot.kovapilot.config.kova_params import LEAD_RESTART_KEY
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
@@ -33,6 +34,40 @@ async def _with_client(test_case, *, is_offroad=True):
   app = create_app(KovaParamsStore(MemoryBackend()), lambda: is_offroad)
   async with TestClient(TestServer(app)) as client:
     await test_case(client)
+
+
+def test_lead_restart_reports_saved_profile_and_applied_native_state():
+  applied, capability = None, "pendingRestart"
+  app = create_app(
+    KovaParamsStore(MemoryBackend()), lambda: False,
+    applied_lead_restart_provider=lambda: applied,
+    dependency_conditions=lambda: {"openpilotLongitudinalApplied": capability, "openpilotCruiseSpeedOwner": capability},
+  )
+
+  async def check():
+    nonlocal applied, capability
+    async with TestClient(TestServer(app)) as client:
+      response = await client.post("/v1/kova-params/update", json={"key": LEAD_RESTART_KEY, "value": 3, "expectedRevision": 0})
+      assert response.status == 200
+      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
+      assert setting["options"] == [0, 1, 2, 3]
+      assert [setting["optionTitles"][str(option)]["ko"] for option in setting["options"]] == ["끔", "느리게", "보통", "빠르게"]
+      assert setting["value"] == 3
+      assert setting["applyState"] == "awaitingStart"
+      assert setting["dependencies"][0]["state"] == "pendingRestart"
+
+      applied, capability = 0, "met"
+      response = await client.get("/v1/kova-params")
+      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
+      assert setting["appliedValue"] == 0
+      assert setting["applyState"] == "pendingParked"
+
+      applied = 3
+      response = await client.get("/v1/kova-params")
+      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
+      assert (setting["value"], setting["appliedValue"], setting["applyState"]) == (3, 3, "applied")
+
+  asyncio.run(check())
 
 
 def test_gateway_reports_saved_and_applied_dependency_states_without_rewriting_preferences():

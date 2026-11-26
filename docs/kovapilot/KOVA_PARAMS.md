@@ -45,6 +45,12 @@ The Gateway appends a `state` to each dependency in read and successful update r
 
 `tools/kovapilot/kovalink_gateway_dev.py` runs the same loopback-only application with an optional fixture catalog (`openpilot/kovapilot/tests/fixtures/kova_params_e2e.json`). It refuses to start without an isolated `PARAMS_ROOT` and always binds `127.0.0.1`. KovaLink's end-to-end transport test drives it and the real `python -m openpilot.kovapilot.gateway` entry point.
 
+## Lead restart response
+
+`cruise.lead_restart_response` defaults to `0` (Off). Values `1`, `2`, and `3` tune the initial departure delay and acceleration ramp during an active openpilot longitudinal session. Preferences are applied while stopped in Park with driver assistance disengaged. The Gateway reports the planner's applied value separately from the stored preference.
+
+All three profiles require the same continuously tracked, radar-matched lead to move away before adding a departure response. The response can hold a monitored stop or reduce positive acceleration after the normal planner permits movement. The normal stop decision, deceleration requests, driver inputs, and accelerator limits take priority. Off and stock ACC keep their existing behavior.
+
 ## Display: onroad screen brightness
 
 `display.onroad_brightness_mode` uses `0` for auto, `1` for auto (dark), and `2` for fixed. It defaults to `0`. `display.onroad_brightness_fixed` uses integers from 10 to 100 percent, with a step of 5 and a default of 50. Both settings have `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.

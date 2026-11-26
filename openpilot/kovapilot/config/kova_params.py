@@ -17,6 +17,7 @@ _LEGACY_BRIGHTNESS_MODES = {
   "auto": BRIGHTNESS_MODE_AUTO, "auto_dark": BRIGHTNESS_MODE_AUTO_DARK, "fixed": BRIGHTNESS_MODE_FIXED,
 }
 CURVE_SLOWDOWN_KEY = "cruise.curve_slowdown"
+LEAD_RESTART_KEY = "cruise.lead_restart_response"
 CRUISE_SYNC_KEY = "cruise.accelerator_sync"
 CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
 LEGACY_PARAM_KEYS = {

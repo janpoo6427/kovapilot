@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from openpilot.kovapilot.bridges.camera_shadow import CameraShadow
-from openpilot.kovapilot.config.kova_params import KovaParamsApplyPolicyError, KovaParamsStore
+from openpilot.kovapilot.config.kova_params import KovaParamsStore
 from openpilot.kovapilot.longitudinal.replay_shadow import read_camera_profile
 from openpilot.kovapilot.longitudinal.shadow import SpeedCandidate
 from openpilot.kovapilot.navigation.camera_input import CameraInput, CameraInputs, MAX_CAMERA_AGE_NS, read_camera_inputs
@@ -144,18 +144,16 @@ class TestCameraShadow(unittest.TestCase):
           with self.assertRaises(ValueError):
             read_camera_profile(path)
 
-  def test_catalog_uses_offroad_revisioned_write(self):
+  def test_catalog_saves_revisioned_preference_while_onroad(self):
     class Backend(dict):
       def put(self, key, value, block=False):
         self[key] = value
 
     backend = Backend()
     store = KovaParamsStore(backend)
-    with self.assertRaises(KovaParamsApplyPolicyError):
-      store.update(CAMERA_PROFILE_KEY, 2, 0, is_offroad=False)
-    self.assertFalse(backend)
-    document = store.update(CAMERA_PROFILE_KEY, 2, 0, is_offroad=True)
+    document = store.update(CAMERA_PROFILE_KEY, 2, 0, is_offroad=False)
     setting = next(item for item in document["settings"] if item["key"] == CAMERA_PROFILE_KEY)
-    self.assertEqual(setting["optionLabels"]["2"]["ko"], "균형")
+    self.assertEqual(setting["applyPolicy"], "offroad")
+    self.assertEqual(setting["optionTitles"]["2"]["ko"], "균형")
     self.assertEqual(setting["value"], 2)
     self.assertEqual(document["revision"], 1)

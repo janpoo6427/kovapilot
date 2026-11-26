@@ -5,6 +5,7 @@ import time
 
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
 from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
+from openpilot.kovapilot.config.lead_restart_settings import applied_lead_restart
 from openpilot.kovapilot.config.parked_setting import fresh_message, parked_for_settings as parked_for_settings
 
 
@@ -72,6 +73,9 @@ class CerealTelemetry:
 
   def applied_curve_slowdown(self) -> int | str | None:
     return applied_curve_slowdown(self._running_pid("plannerd"))
+
+  def applied_lead_restart(self) -> int | None:
+    return applied_lead_restart(self._running_pid("plannerd"))
 
   def _running_pid(self, name: str) -> int | None:
     self.sm.update(0)

@@ -10,7 +10,9 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.kovapilot.bridges.camera_runtime import (CAMERA_BATCH_LIMIT, CAMERA_EVENT_SERVICE, CameraRuntime,
                                                       camera_cruise_speed, read_camera_profile)
 from openpilot.kovapilot.bridges.curve_runtime import CurveRuntime
+from openpilot.kovapilot.bridges.lead_restart_runtime import LeadRestartRuntime
 from openpilot.kovapilot.config.curve_slowdown_settings import CurveSlowdownPreference, publish_applied_curve_slowdown
+from openpilot.kovapilot.config.lead_restart_settings import LeadRestartPreference, publish_applied_lead_restart
 from openpilot.kovapilot.longitudinal.curve_slowdown import CurveLimits, MIN_MOVING_SPEED_MPS
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.selfdrive.controls.lib.ldw import LaneDepartureWarning
@@ -23,6 +25,13 @@ def _report_curve_setting(enabled: bool, supported: bool) -> None:
     publish_applied_curve_slowdown(enabled, supported=supported)
   except OSError:
     cloudlog.exception("failed to publish applied curve slowdown setting")
+
+
+def _report_lead_restart(profile: int) -> None:
+  try:
+    publish_applied_lead_restart(profile)
+  except OSError:
+    cloudlog.exception("failed to publish applied lead restart response")
 
 
 def main():
@@ -48,11 +57,19 @@ def main():
   curve_preference = CurveSlowdownPreference(params) if curve_supported else None
   curve = None
   _report_curve_setting(False, curve_supported)
+  restart_supported = longitudinal_supported and not CP.pcmCruise and not CP.notCar
+  restart_preference = LeadRestartPreference(params) if restart_supported else None
+  lead_restart = None
+  if restart_supported:
+    _report_lead_restart(0)
 
   while True:
     sm.update()
     if sm.updated['modelV2']:
       now_ns = time.monotonic_ns()
+      if restart_preference is not None and (restart_profile := restart_preference.poll(sm, now_ns)) is not None:
+        lead_restart = LeadRestartRuntime(restart_profile) if restart_profile else None
+        _report_lead_restart(restart_profile)
       if curve_preference is not None and (enabled := curve_preference.poll(sm, now_ns)) is not None:
         curve = (CurveRuntime(CurveLimits(decel_mps2=-A_CRUISE_MIN, jerk_mps3=min(J_CRUISE_VALS),
                                           response_s=CRUISE_ACCEL_RESPONSE_TIME + delay, min_turn_speed_mps=MIN_MOVING_SPEED_MPS))
@@ -81,7 +98,7 @@ def main():
         else:
           curve.invalidate()
       longitudinal_planner.update(sm, camera_speed_cap=camera_cap, camera_eligible=camera is not None and cruise_speed is not None,
-                                  curve_speed_cap=curve_cap, curve_eligible=curve_eligible)
+                                  curve_speed_cap=curve_cap, curve_eligible=curve_eligible, lead_restart=lead_restart, now_ns=now_ns)
       longitudinal_planner.publish(sm, pm)
 
       ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])

@@ -54,7 +54,8 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm, *, camera_speed_cap=None, camera_eligible=False, curve_speed_cap=None, curve_eligible=False):
+  def update(self, sm, *, camera_speed_cap=None, camera_eligible=False, curve_speed_cap=None, curve_eligible=False,
+             lead_restart=None, now_ns=0):
     v_ego = sm['carState'].vEgo
     personality = sm['selfdriveState'].personality
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
@@ -148,6 +149,11 @@ class LongitudinalPlanner:
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
+    if lead_restart is not None and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and not self.CP.dashcamOnly and not self.CP.notCar:
+      output_a_target, self.output_should_stop = lead_restart.constrain(
+        sm, now_ns=now_ns, reset_state=reset_state, should_stop=self.output_should_stop,
+        target_accel=output_a_target, previous_accel=a_prev, dt=self.dt,
+      )
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0

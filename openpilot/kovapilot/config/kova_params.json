@@ -184,6 +184,34 @@
       "availability": "pendingConsumer"
     },
     {
+      "key": "cruise.lead_restart_response",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "openpilotCruiseSpeedOwner", "title": {"ko": "KOVA 크루즈 설정속도 제어", "en": "KOVA cruise set speed control"}}
+      ],
+      "groupId": "cruise",
+      "order": 175,
+      "type": "enum",
+      "options": [0, 1, 2, 3],
+      "optionTitles": {
+        "0": {"ko": "끔", "en": "Off"},
+        "1": {"ko": "느리게", "en": "Slow"},
+        "2": {"ko": "보통", "en": "Normal"},
+        "3": {"ko": "빠르게", "en": "Fast"}
+      },
+      "defaultValue": 0,
+      "title": {"ko": "앞차 출발 추종 반응", "en": "Lead restart response"},
+      "description": {
+        "ko": "앞차를 따라 정차한 뒤 다시 출발할 때의 대기와 초반 가속을 조절합니다. 끔은 기존 동작을 유지합니다.",
+        "en": "Adjusts the delay and initial acceleration when following a lead vehicle away from a stop. Off keeps the existing behavior."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "parked",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
       "key": "cruise.accelerator_sync_stock_shadow",
       "dependencies": [
         {"condition": "stockCruiseSpeedOwner", "title": {"ko": "순정 ACC 설정속도 제어", "en": "Stock ACC cruise set speed control"}},
