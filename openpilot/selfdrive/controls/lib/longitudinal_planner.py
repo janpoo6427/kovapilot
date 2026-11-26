@@ -23,14 +23,17 @@ J_CRUISE_BP = [0., 10.0, 25., 40.]
 A_CRUISE_MIN = -0.5
 # Hard floor for a speed cap that was planned with a stronger deceleration (stock navigation cameras).
 A_SPEED_CAP_MIN = -1.2
+# Such a cap ends a stronger deceleration; when the follower dips under it, climb back as
+# (cap - v_ego) / this time so the car levels at the cap instead of swinging over it.
+SPEED_CAP_SETTLE_TIME = 3.0
 CRUISE_ACCEL_RESPONSE_TIME = 1.0
 AGGRESSIVE_ACCEL_BOOST = 0.1  # m/s^2
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 
-def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt, a_min=A_CRUISE_MIN):
+def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt, a_min=A_CRUISE_MIN, a_max=ACCEL_MAX):
   target_accel = smooth_value(v_cruise - v_ego, a_cruise_prev, tau=CRUISE_ACCEL_RESPONSE_TIME, dt=dt)
-  target_accel = np.clip(target_accel, a_min, ACCEL_MAX)
+  target_accel = np.clip(target_accel, a_min, a_max)
   j_cruise = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS)
   target_accel = float(np.clip(target_accel, min(a_cruise_prev, a_target_prev) - j_cruise * dt, a_cruise_prev + j_cruise * dt))
 
@@ -135,12 +138,14 @@ class LongitudinalPlanner:
       if selected is not None:
         cap, self.speed_cap_source = selected
         cap_prev = self.a_speed_cap if self.a_speed_cap is not None else a_cruise_prev
-        a_min = A_CRUISE_MIN
+        a_min, a_max = A_CRUISE_MIN, ACCEL_MAX
         if (self.speed_cap_source == "camera" and camera_decel_mps2 is not None and isfinite(camera_decel_mps2)
             and camera_decel_mps2 > -A_CRUISE_MIN):
-          # The camera approach was planned for this deceleration; follow it, never beyond A_SPEED_CAP_MIN.
+          # The camera approach was planned for this deceleration; follow it, never beyond A_SPEED_CAP_MIN,
+          # and settle onto the cap from below without overshooting it (the jerk limits still apply).
           a_min = max(-camera_decel_mps2, A_SPEED_CAP_MIN)
-        self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt, a_min)
+          a_max = min(ACCEL_MAX, max(0.0, (cap - v_ego) / SPEED_CAP_SETTLE_TIME))
+        self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt, a_min, a_max)
       elif self.a_speed_cap is not None:
         # An expired cap is released at the existing positive cruise jerk limit.
         step = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS) * self.dt

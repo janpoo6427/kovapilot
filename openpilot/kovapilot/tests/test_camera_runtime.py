@@ -9,7 +9,7 @@ from openpilot.kovapilot.bridges.camera_runtime import CAMERA_EVENT_SERVICE, Cam
 from openpilot.kovapilot.navigation.camera_input import MAX_CAMERA_AGE_NS
 from openpilot.kovapilot.navigation.camera_profile import STOCK_NAVI_DECEL_MPS2
 from openpilot.kovapilot.navigation.vehicle_navi import VEHICLE_SOURCE
-from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, A_SPEED_CAP_MIN, LongitudinalPlanner
+from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, A_SPEED_CAP_MIN, SPEED_CAP_SETTLE_TIME, LongitudinalPlanner
 
 
 class Inputs(dict):
@@ -231,3 +231,24 @@ class TestCameraPlannerDeceleration(unittest.TestCase):
       lowest = min(lowest, planner.a_speed_cap)
     self.assertEqual(planner.speed_cap_source, "curve")
     self.assertAlmostEqual(lowest, A_CRUISE_MIN)
+
+  def highest_cap_accel(self, v_ego, **kw):
+    cp = car.CarParams.new_message(openpilotLongitudinalControl=True, longitudinalActuatorDelay=0.5)
+    planner = LongitudinalPlanner(cp, init_v=v_ego)
+    inputs = planner_inputs(vEgo=v_ego, vCruise=100.0)
+    highest = float("-inf")
+    for _ in range(200):
+      planner.update(inputs, camera_speed_cap=15.0, camera_eligible=True, **kw)
+      highest = max(highest, planner.a_speed_cap)
+    return highest
+
+  def test_planned_camera_cap_is_met_from_below_without_overshoot(self):
+    # Under the cap after a planned (stock navigation) deceleration: climb back at most gap / settle time.
+    climb = self.highest_cap_accel(14.0, camera_decel_mps2=STOCK_NAVI_DECEL_MPS2)
+    self.assertGreater(climb, 0.0)
+    self.assertLessEqual(climb, 1.0 / SPEED_CAP_SETTLE_TIME + 1e-9)
+    # At the cap it asks for no acceleration.
+    self.assertLessEqual(self.highest_cap_accel(15.0, camera_decel_mps2=STOCK_NAVI_DECEL_MPS2), 0.0)
+    # App cameras (no planned deceleration) keep the cruise follower.
+    self.assertGreater(self.highest_cap_accel(14.0), 1.0 / SPEED_CAP_SETTLE_TIME + 0.1)
+    self.assertGreater(self.highest_cap_accel(14.0, camera_decel_mps2=-A_CRUISE_MIN), 1.0 / SPEED_CAP_SETTLE_TIME + 0.1)
