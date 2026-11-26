@@ -18,6 +18,9 @@ from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LanAccess
 
 
 PORT = 8084
+# A failed automatic install is retried after this, doubling up to the cap.
+INSTALL_RETRY = 30.0
+INSTALL_RETRY_MAX = 900.0
 READ_TOKEN_CONTEXT = b"kovalink-tailscale-read-v1"
 SERVE_TARGET = f"http://127.0.0.1:{PORT}"
 LOGIN_URL = re.compile(r"https://login\.tailscale\.com/a/[A-Za-z0-9_-]{1,128}")
@@ -25,9 +28,16 @@ TAILNET_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-
 
 
 class Tailscale:
+  # [offroad] says when connecting and disconnecting are allowed: the
+  # Gateway passes "offroad, or in Park and disengaged".
   def __init__(self, directory: Path, access: LanAccess, offroad: Callable[[], bool], telemetry: Callable,
-               device_info: Callable[[], dict]):
+               device_info: Callable[[], dict], installer: Callable[[], None] | None = None):
     self.directory = directory
+    # Installs the binaries into [directory] when they are missing (blocking;
+    # runs in a thread). None keeps the manual installation only.
+    self.installer = installer
+    self.install_retry = INSTALL_RETRY
+    self.next_install = 0.0
     self.access = access
     self.offroad = offroad
     self.telemetry = telemetry
@@ -98,11 +108,31 @@ class Tailscale:
     else:
       self.current = {"state": "starting" if self.login is None or self.login.done() else "authorizing"}
 
+  async def _install(self) -> None:
+    """One automatic install attempt when it is due. The lock is not held:
+    the download can take a while and status requests must still answer."""
+    loop = asyncio.get_running_loop()
+    if self.installer is None or loop.time() < self.next_install:
+      return
+    self.current = {"state": "installing"}
+    try:
+      await asyncio.to_thread(self.installer)
+    except Exception:
+      self.current = {"state": "installFailed"}
+      self.next_install = loop.time() + self.install_retry
+      self.install_retry = min(self.install_retry * 2, INSTALL_RETRY_MAX)
+    else:
+      self.install_retry = INSTALL_RETRY
+      self.next_install = 0.0
+
   async def _run(self) -> None:
     while True:
+      if not self.installed():
+        await self._install()
       async with self.lock:
         if not self.installed():
-          self.current = {"state": "notInstalled"}
+          if self.installer is None or self.current["state"] not in ("installing", "installFailed"):
+            self.current = {"state": "notInstalled"}
         else:
           try:
             if self.daemon is None or self.daemon.returncode is not None:
@@ -130,7 +160,7 @@ class Tailscale:
     if request.method == "POST":
       async with self.lock:
         if not self.offroad():
-          raise web.HTTPConflict(text="VPN registration requires offroad mode.")
+          raise web.HTTPConflict(text="VPN registration requires Park or offroad mode.")
         if self.daemon is None or self.daemon.returncode is not None or not self.installed():
           raise web.HTTPServiceUnavailable(text="Tailscale is unavailable.")
         if request.match_info["action"] == "connect":

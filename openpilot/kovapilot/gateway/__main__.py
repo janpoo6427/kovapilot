@@ -50,6 +50,7 @@ def main() -> None:
   from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
   from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, show_pairing_code
   from openpilot.kovapilot.gateway.tailscale import Tailscale
+  from openpilot.kovapilot.gateway.tailscale_install import choose_directory, install as install_tailscale
   from openpilot.kovapilot.gateway.telemetry import CerealTelemetry
 
   settings_params = Params()
@@ -94,7 +95,12 @@ def main() -> None:
     owner_pairing=owner_pairing,
   )
   if not PC and lan is not None:
-    Tailscale(provisioned.parent / "tailscale", lan[0], is_offroad, telemetry, vpn_device_info).attach(app)
+    tailscale_directory = choose_directory(provisioned.parent / "tailscale", DEVICE_PACKAGES.parent.parent / "tailscale")
+    def vpn_change_allowed() -> bool:
+      return is_offroad() or telemetry.is_parked_and_disengaged()
+
+    Tailscale(tailscale_directory, lan[0], vpn_change_allowed, telemetry, vpn_device_info,
+              installer=partial(install_tailscale, tailscale_directory, DEVICE_PACKAGES.parent)).attach(app)
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
   else:
