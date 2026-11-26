@@ -10,7 +10,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LanAccess
-from openpilot.kovapilot.gateway.tailscale import READ_TOKEN_CONTEXT, SERVE_TARGET, Tailscale
+from openpilot.kovapilot.gateway.tailscale import READ_TOKEN_CONTEXT, Tailscale
 
 
 TOKEN = "a" * 64
@@ -39,13 +39,12 @@ def test_routes_and_browser_login_follow_confirmed_daemon_state(service, monkeyp
       command.return_value = json.dumps({"BackendState": "NeedsMachineAuth"})
       await service._refresh()
       assert service.current == {"state": "approvalRequired"}
-      command.side_effect = [json.dumps({"BackendState": "Running", "Self": {"DNSName": HOST + "."}}), None]
+      # 2026-11-27 janpoo: no MagicDNS/HTTPS serve; the phone uses the VPN IP.
+      command.return_value = json.dumps({"BackendState": "Running",
+                                         "Self": {"DNSName": HOST + ".", "TailscaleIPs": ["100.101.102.103"]}})
       await service._refresh()
-      assert service.current == {"state": "gatewayUnavailable"}
-      command.side_effect = [json.dumps({"BackendState": "Running", "Self": {"DNSName": HOST + "."}}), ""]
-      await service._refresh()
-      assert service.current == {"state": "connected", "host": HOST}
-      command.assert_awaited_with("serve", "--bg", "--https=443", SERVE_TARGET)
+      assert service.current == {"state": "connected", "host": "100.101.102.103", "port": 8083}
+      command.assert_awaited_with("status", "--json")
     finally:
       await service._cancel_login()
 

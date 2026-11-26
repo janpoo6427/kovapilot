@@ -46,7 +46,7 @@ def main() -> None:
   from openpilot.kovapilot.gateway.camera import CameraSignaling
   from openpilot.kovapilot.gateway.device_restart import REBOOT_KEY, DeviceRestart, restart_allowed
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
-  from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
+  from openpilot.kovapilot.gateway.lan import LOOPBACK_GUARD_KEY, TAILNET_KEY, TAILNET_PORT, WIFI_INTERFACE, load_lan_config, serve_lan
   from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
   from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, show_pairing_code
   from openpilot.kovapilot.gateway.tailscale import Tailscale
@@ -99,8 +99,13 @@ def main() -> None:
     def vpn_change_allowed() -> bool:
       return is_offroad() or telemetry.is_parked_and_disengaged()
 
-    Tailscale(tailscale_directory, lan[0], vpn_change_allowed, telemetry, vpn_device_info,
-              installer=partial(install_tailscale, tailscale_directory, DEVICE_PACKAGES.parent)).attach(app)
+    tailscale = Tailscale(tailscale_directory, lan[0], vpn_change_allowed, telemetry, vpn_device_info,
+                          installer=partial(install_tailscale, tailscale_directory, DEVICE_PACKAGES.parent))
+    tailscale.attach(app)
+    # The owner's phone over the VPN: TLS on 127.0.0.1:TAILNET_PORT, and the
+    # plain loopback API refuses what tailscaled forwards.
+    app[TAILNET_KEY] = TAILNET_PORT
+    app[LOOPBACK_GUARD_KEY] = tailscale.from_daemon
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)
   else:

@@ -16,6 +16,7 @@ from jeepney.io.threading import DBusRouter, open_dbus_connection as open_dbus_c
 from jeepney.low_level import MessageType
 from jeepney.wrappers import Properties
 
+from openpilot.kovapilot.vpn_switch import user_cut_network
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.ui.lib.networkmanager import (NM, NM_WIRELESS_IFACE, NM_802_11_AP_SEC_PAIR_WEP40,
                                                     NM_802_11_AP_SEC_PAIR_WEP104, NM_802_11_AP_SEC_GROUP_WEP40,
@@ -645,7 +646,15 @@ class WifiManager:
     settings_addr = DBusAddress(NM_SETTINGS_PATH, bus_name=NM, interface=NM_SETTINGS_IFACE)
     self._router_main.send_and_get_reply(new_method_call(settings_addr, 'AddConnection', 'a{sa{sv}}', (connection,)))
 
+  def _user_cut_network(self, ssid: str | None) -> None:
+    """The user leaves the network the comma is on: the KovaLink VPN goes off
+    with it (see openpilot/kovapilot/vpn_switch.py)."""
+    current = self.connected_ssid
+    if current is not None and current != ssid:
+      user_cut_network()
+
   def connect_to_network(self, ssid: str, password: str, hidden: bool = False):
+    self._user_cut_network(ssid)
     self._set_connecting(ssid)
 
     def worker():
@@ -697,6 +706,10 @@ class WifiManager:
     self._requests.put(worker)
 
   def forget_connection(self, ssid: str, block: bool = False):
+    # block=True is connect_to_network clearing the target first, not the user.
+    if not block and ssid == self.connected_ssid:
+      user_cut_network()
+
     def worker():
       conn_path = self._connections.get(ssid, None)
       if conn_path is None:
@@ -713,6 +726,8 @@ class WifiManager:
       self._requests.put(worker)
 
   def activate_connection(self, ssid: str, block: bool = False):
+    if not block:
+      self._user_cut_network(ssid)
     self._set_connecting(ssid)
 
     def worker():
@@ -815,6 +830,9 @@ class WifiManager:
     self._ipv4_forward = enabled
 
   def set_tethering_active(self, active: bool):
+    if active:
+      user_cut_network()
+
     def worker():
       if active:
         self.activate_connection(self._tethering_ssid, block=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -14,7 +15,8 @@ from pathlib import Path
 
 from aiohttp import web
 
-from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LanAccess
+from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, TAILNET_PORT, LanAccess, connection_from_process
+from openpilot.kovapilot.vpn_switch import NETWORK_CUT, RUNTIME_DIR, VPN_OFF
 
 
 PORT = 8084
@@ -24,6 +26,7 @@ INSTALL_RETRY_MAX = 900.0
 READ_TOKEN_CONTEXT = b"kovalink-tailscale-read-v1"
 SERVE_TARGET = f"http://127.0.0.1:{PORT}"
 LOGIN_URL = re.compile(r"https://login\.tailscale\.com/a/[A-Za-z0-9_-]{1,128}")
+TAILNET_IPS = ipaddress.IPv4Network("100.64.0.0/10")
 TAILNET_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ts\.net")
 
 
@@ -31,8 +34,14 @@ class Tailscale:
   # [offroad] says when connecting and disconnecting are allowed: the
   # Gateway passes "offroad, or in Park and disengaged".
   def __init__(self, directory: Path, access: LanAccess, offroad: Callable[[], bool], telemetry: Callable,
-               device_info: Callable[[], dict], installer: Callable[[], None] | None = None):
+               device_info: Callable[[], dict], installer: Callable[[], None] | None = None,
+               runtime_dir: Path = RUNTIME_DIR):
     self.directory = directory
+    # Boot connects by itself; a VPN turned off by the owner or by the user
+    # cutting the comma's network stays off until KovaLink turns it on.
+    self.network_cut = runtime_dir / NETWORK_CUT
+    self.vpn_off = runtime_dir / VPN_OFF
+    self.auto_up = False
     # Installs the binaries into [directory] when they are missing (blocking;
     # runs in a thread). None keeps the manual installation only.
     self.installer = installer
@@ -81,6 +90,17 @@ class Tailscale:
           proc.kill()
         await proc.wait()
 
+  @staticmethod
+  def _tailnet_ip(status: dict) -> str | None:
+    for value in (status.get("Self") or {}).get("TailscaleIPs") or []:
+      try:
+        address = ipaddress.ip_address(value)
+      except (TypeError, ValueError):
+        continue
+      if address.version == 4 and address in TAILNET_IPS:
+        return str(address)
+    return None
+
   async def _refresh(self) -> None:
     raw = await self._command("status", "--json")
     try:
@@ -89,22 +109,25 @@ class Tailscale:
       status = {}
     state = status.get("BackendState")
     if state == "Running":
-      host = ((status.get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
-      if TAILNET_HOST.fullmatch(host) and self.current.get("host") == host and self.current["state"] == "connected":
-        return
-      self.current = {"state": "gatewayUnavailable"}
-      if TAILNET_HOST.fullmatch(host) and await self._command("serve", "--bg", "--https=443", SERVE_TARGET) is not None:
-        self.current = {"state": "connected", "host": host}
+      # The phone connects to the comma's VPN IP; no MagicDNS or HTTPS.
+      host = self._tailnet_ip(status)
+      self.current = {"state": "connected", "host": host, "port": TAILNET_PORT} if host else {"state": "starting"}
     elif state == "NeedsMachineAuth":
       self.current = {"state": "approvalRequired"}
     elif state in ("NeedsLogin", "Stopped"):
       url = status.get("AuthURL") or ""
       if self.login is not None and not self.login.done():
-        self.current = {"state": "authorizing"}
+        self.current = {"state": "starting" if self.auto_up and not LOGIN_URL.fullmatch(url) else "authorizing"}
         if LOGIN_URL.fullmatch(url):
           self.current["loginUrl"] = url
+      elif state == "Stopped" and not self.vpn_off.exists():
+        # Logged in and off, not on purpose (boot): connect by itself.
+        self.auto_up = True
+        self.login = asyncio.create_task(self._authorize())
+        self.current = {"state": "starting"}
       else:
-        self.current = {"state": "needsLogin"}
+        # Stopped: logged in, VPN off on purpose (`tailscale down`).
+        self.current = {"state": "stopped" if state == "Stopped" else "needsLogin"}
     else:
       self.current = {"state": "starting" if self.login is None or self.login.done() else "authorizing"}
 
@@ -143,6 +166,7 @@ class Tailscale:
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
                 env={**os.environ, "TS_NO_LOGS_NO_SUPPORT": "true"},
               )
+            await self._network_cut_by_user()
             await self._refresh()
           except OSError:
             self.current = {"state": "daemonUnavailable"}
@@ -150,6 +174,31 @@ class Tailscale:
 
   async def _authorize(self) -> None:
     await self._command("up", "--accept-dns=false", "--accept-routes=false", "--timeout=180s", deadline=185)
+
+  def _set_off(self, off: bool) -> None:
+    with suppress(OSError):
+      if off:
+        self.vpn_off.write_text("1\n", encoding="ascii")
+      else:
+        self.vpn_off.unlink(missing_ok=True)
+
+  async def _stop(self) -> None:
+    """VPN off on purpose; stays off until KovaLink connects again."""
+    await self._cancel_login()
+    self._set_off(True)
+    if await self._command("down") is None:
+      raise web.HTTPServiceUnavailable(text="Could not turn the VPN off.")
+    self.current = {"state": "stopped"}
+
+  async def _network_cut_by_user(self) -> None:
+    """The comma screen reported that the user cut the network."""
+    if not self.network_cut.exists():
+      return
+    with suppress(OSError):
+      self.network_cut.unlink()
+    if self.current["state"] in ("connected", "starting", "authorizing", "approvalRequired"):
+      with suppress(web.HTTPServiceUnavailable):
+        await self._stop()
 
   def _has_owner_token(self, request: web.Request) -> bool:
     return self.access.is_owner(request.headers.getall("Authorization", []))
@@ -164,10 +213,15 @@ class Tailscale:
         if self.daemon is None or self.daemon.returncode is not None or not self.installed():
           raise web.HTTPServiceUnavailable(text="Tailscale is unavailable.")
         if request.match_info["action"] == "connect":
-          if self.current["state"] in ("needsLogin", "starting") and (self.login is None or self.login.done()):
+          self._set_off(False)
+          if self.current["state"] in ("needsLogin", "starting", "stopped") and (self.login is None or self.login.done()):
+            self.auto_up = False
             self.login = asyncio.create_task(self._authorize())
             self.current = {"state": "authorizing"}
+        elif request.match_info["action"] == "stop":
+          await self._stop()
         else:
+          self._set_off(False)
           await self._cancel_login()
           if await self._command("logout") is None:
             raise web.HTTPServiceUnavailable(text="Could not disconnect Tailscale.")
@@ -221,7 +275,15 @@ class Tailscale:
           await self.daemon.wait()
       await runner.cleanup()
 
+  def from_daemon(self, local: tuple, peer: tuple) -> bool:
+    """True when the running tailscaled made this loopback connection (a
+    tailnet peer forwarded to 127.0.0.1)."""
+    daemon = self.daemon
+    if daemon is None or daemon.returncode is not None:
+      return False
+    return connection_from_process(daemon.pid, local, peer)
+
   def attach(self, app: web.Application) -> None:
     app.cleanup_ctx.append(self.lifecycle)
     app.router.add_get("/v1/vpn", self.manage, allow_head=False)
-    app.router.add_post(r"/v1/vpn/{action:connect|disconnect}", self.manage)
+    app.router.add_post(r"/v1/vpn/{action:connect|stop|disconnect}", self.manage)

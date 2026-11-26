@@ -22,3 +22,11 @@
 - 연결 해제는 Wi-Fi의 소유자 연결에서 수행할 수 있다. 장치에 접근할 수 없으면 Tailscale 관리자 콘솔의 Machines에서 해당 노드의 권한을 회수할 수 있다.
 
 정차 벤치에서 모바일 데이터 접속, 정상 재부팅, AGNOS 슬롯 전환, 권한 회수 후 접속 거절, 기존 Wi-Fi 접속 유지 여부를 각각 확인한다.
+
+## VPN IP로 전체 기능 (2026-11-27)
+
+- DNS·`tailscale serve`·HTTPS 인증서를 쓰지 않는다. VPN이 켜지면 `GET /v1/vpn`이 `{"state": "connected", "host": "100.x.y.z", "port": 8083}`을 준다.
+- 콤마의 Tailscale은 userspace라 tailnet에서 `100.x:<port>`로 온 연결을 콤마의 `127.0.0.1:<port>`로 넘긴다. Gateway는 `127.0.0.1:8083`에 Wi-Fi와 같은 인증서로 TLS를 연다. 여기로 온 요청은 전부 소유자 토큰이 있어야 하고(없으면 401 Bearer), `Origin`이 있으면 403, 소유자 등록(`/v1/owner/*`)은 쓰지 않는다. `/v1/health`는 `bindScope: tailnet`, `authentication: bearer`.
+- 평문 내부 API(`127.0.0.1:8082`)는 연결의 상대편 소켓이 실행 중인 tailscaled 것이면(`/proc/net/tcp*`의 inode와 `/proc/<pid>/fd`로 확인, 모르면 거절) 403으로 막는다. tailnet 기기가 토큰 없이 내부 API에 닿지 못하게 하려는 것이다.
+- 켜기·끄기: 부팅하면 로그인돼 있는 한 알아서 켠다(`Stopped`이면 `up`). 소유자가 앱에서 끄거나(`POST /v1/vpn/stop` → `tailscale down`) 콤마 화면에서 사용자가 지금 쓰는 Wi-Fi를 잊거나 다른 Wi-Fi로 바꾸거나 테더링을 켜면(`system/ui/lib/wifi_manager.py` → `/dev/shm/kova_vpn_network_cut`) 끄고 `/dev/shm/kova_vpn_off`를 남긴다. 그 동안은 네트워크가 돌아와도 꺼진 채(`stopped`)이고, 앱의 'VPN 켜기'(`connect`)나 재부팅(`/dev/shm` 비워짐) 때 다시 켠다. 핫스팟·공유기가 꺼지는 것은 신호 끊김과 구분되지 않아 끄지 않는다.
+- 카메라(WebRTC)는 userspace Tailscale에서 콤마가 tailnet으로 UDP를 보내지 못해 VPN으로는 안 될 수 있다(미확인).

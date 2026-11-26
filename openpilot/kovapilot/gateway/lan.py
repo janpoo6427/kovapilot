@@ -14,6 +14,7 @@ from contextlib import suppress
 import stat
 import struct
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -95,6 +96,64 @@ class LanAccess:
 
 LAN_ACCESS_KEY = web.AppKey("lan_access", LanAccess)
 LAN_SOCKETS_KEY = web.AppKey("lan_sockets", set)
+
+# The comma's Tailscale runs in userspace: tailscaled hands a tailnet
+# connection to 100.x:<port> to 127.0.0.1:<port> on the comma. The Gateway
+# listens with its Wi-Fi certificate on this loopback port for the owner's
+# phone over the VPN.
+TAILNET_PORT = 8083
+TAILNET_KEY = web.AppKey("tailnet_port", int)
+# (local, peer) of a plain loopback connection -> True when tailscaled made
+# it (a tailnet peer), which the loopback API must not trust.
+LOOPBACK_GUARD_KEY = web.AppKey("loopback_guard", Callable)
+VIA_TAILNET = web.RequestKey("kova_via_tailnet", bool)
+
+
+def _proc_address(ip: str, port: int) -> tuple[str, str]:
+  """(IPv4 table, IPv6 table) spelling of ip:port in /proc/net/tcp*."""
+  v4 = socket.inet_aton(ip)
+  v6 = ipaddress.IPv6Address("::ffff:" + ip).packed
+  six = "".join(v6[i:i + 4][::-1].hex() for i in range(0, 16, 4))
+  return f"{v4[::-1].hex()}:{port:04x}".upper(), f"{six}:{port:04x}".upper()
+
+
+def peer_socket_inode(local: tuple, peer: tuple) -> str | None:
+  """Inode of the client end of our accepted loopback connection."""
+  try:
+    ours_v4, ours_v6 = _proc_address(local[0], local[1])
+    theirs_v4, theirs_v6 = _proc_address(peer[0], peer[1])
+  except (OSError, ValueError, IndexError, TypeError):
+    return None
+  for table, theirs, ours in (("/proc/net/tcp", theirs_v4, ours_v4), ("/proc/net/tcp6", theirs_v6, ours_v6)):
+    try:
+      lines = Path(table).read_text(encoding="ascii").splitlines()[1:]
+    except OSError:
+      continue
+    for line in lines:
+      fields = line.split()
+      if len(fields) > 9 and fields[1] == theirs and fields[2] == ours and fields[9] != "0":
+        return fields[9]
+  return None
+
+
+def connection_from_process(pid: int, local: tuple, peer: tuple) -> bool:
+  """True when process [pid] holds the other end of a loopback connection.
+  Unknown (the socket is not found or the process cannot be read) counts as
+  True: the caller refuses the connection."""
+  inode = peer_socket_inode(local, peer)
+  if inode is None:
+    return True
+  target = f"socket:[{inode}]"
+  fds = Path(f"/proc/{pid}/fd")
+  try:
+    names = os.listdir(fds)
+  except OSError:
+    return True
+  for name in names:
+    with suppress(OSError):
+      if os.readlink(fds / name) == target:
+        return True
+  return False
 
 
 def load_lan_config(directory: Path, *, require_token: bool = True) -> tuple[LanAccess, ssl.SSLContext] | None:
@@ -186,6 +245,11 @@ async def serve_lan(app, port, context, on_bind_error, *, advertise=None):
   try:
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", port).start()
+    if (tailnet := app.get(TAILNET_KEY)) is not None:
+      try:
+        await web.TCPSite(runner, "127.0.0.1", tailnet, ssl_context=context).start()
+      except OSError:
+        on_bind_error()
     while not stop.is_set():
       address = wifi_address()
       if address != access.address:

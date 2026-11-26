@@ -25,7 +25,7 @@ from openpilot.kovapilot.config.kova_params import (
 from openpilot.kovapilot.gateway.camera import camera_offer
 from openpilot.kovapilot.gateway.device_restart import DeviceRestart, RestartBlocked
 from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
-from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
+from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY, LOOPBACK_GUARD_KEY, TAILNET_KEY, VIA_TAILNET
 from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
 from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, PairingBlocked, PairingBusy, PairingCodeInvalid, PairingExpired
 from openpilot.kovapilot.gateway.setting_dependencies import evaluate_dependencies
@@ -158,17 +158,19 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
 
 
 async def health(request: web.Request) -> web.Response:
+  tailnet = request.get(VIA_TAILNET, False)
   body = {
     "status": "ok",
     "schemaVersion": API_SCHEMA_VERSION,
-    "bindScope": "wifi" if request.secure else "loopback",
-    "authentication": request.app[LAN_ACCESS_KEY].authentication if request.secure else "localProcessOnly",
+    "bindScope": "tailnet" if tailnet else "wifi" if request.secure else "loopback",
+    "authentication": ("bearer" if tailnet else request.app[LAN_ACCESS_KEY].authentication) if request.secure
+                      else "localProcessOnly",
   }
   if request.secure:
     access = request.app[LAN_ACCESS_KEY]
     pairing = request.app.get(OWNER_PAIRING_KEY)
     body.update(owner=_is_owner(request), ownerRegistered=access.owner_secret is not None,
-                ownerPairing=pairing is not None and pairing.available)
+                ownerPairing=not tailnet and pairing is not None and pairing.available)
   return web.json_response(body)
 
 
@@ -239,11 +241,27 @@ async def update_kova_params(request: web.Request) -> web.Response:
   return web.json_response(_with_device_state(request, document, device_state))
 
 
+def _tailnet_listener(request, local) -> bool:
+  port = request.app.get(TAILNET_KEY)
+  return port is not None and bool(local) and local[0] == "127.0.0.1" and local[1] == port
+
+
 @web.middleware
 async def local_client(request, handler):
+  local = request.transport.get_extra_info("sockname") if request.transport else None
+  if request.secure and _tailnet_listener(request, local):
+    # The owner's phone over the VPN: every request needs the owner token.
+    access = request.app.get(LAN_ACCESS_KEY)
+    if access is None or "Origin" in request.headers:
+      return _error(403, "tailnet_client_required", "use the KovaLink app over the comma VPN")
+    if not access.is_owner(request.headers.getall("Authorization", [])):
+      response = _error(401, "authentication_required", "the owner token is required over the VPN")
+      response.headers["WWW-Authenticate"] = "Bearer"
+      return response
+    request[VIA_TAILNET] = True
+    return await handler(request)
   if request.secure:
     access = request.app.get(LAN_ACCESS_KEY)
-    local = request.transport.get_extra_info("sockname") if request.transport else None
     if (access is None or not local or not access.accepts_peer(local[0], request.remote or "")
         or request.host not in (local[0], f"{local[0]}:{local[1]}") or "Origin" in request.headers):
       return _error(403, "wifi_client_required", "use the device Wi-Fi IPv4 address")
@@ -259,6 +277,11 @@ async def local_client(request, handler):
       return response
     return await handler(request)
   if request.remote not in ("127.0.0.1", "::1") or request.headers.get("Origin") is not None:
+    return _error(403, "local_client_required", "only native loopback clients are supported")
+  guard = request.app.get(LOOPBACK_GUARD_KEY)
+  peer = request.transport.get_extra_info("peername") if request.transport else None
+  if guard is not None and (not local or not peer or guard(local, peer)):
+    # A tailnet peer reaches loopback ports through tailscaled.
     return _error(403, "local_client_required", "only native loopback clients are supported")
   host = request.host
   if host != "[::1]" and not host.startswith("[::1]:") and host.split(":", 1)[0].lower() not in ("localhost", "127.0.0.1"):
@@ -276,7 +299,7 @@ async def telemetry_stream(request):
   ws = web.WebSocketResponse(heartbeat=15, max_msg_size=1024, compress=False)
   sockets.add(ws)
   lan_sockets = request.app[LAN_SOCKETS_KEY]
-  if request.secure:
+  if request.secure and not request.get(VIA_TAILNET, False):
     lan_sockets.add(ws)
 
   async def publish():
@@ -333,6 +356,8 @@ def _git_authorized(request):
 
 def _pairing(request) -> OwnerPairing | None:
   pairing = request.app.get(OWNER_PAIRING_KEY)
+  if request.get(VIA_TAILNET, False):
+    return None
   return pairing if request.secure and pairing is not None and pairing.available else None
 
 
