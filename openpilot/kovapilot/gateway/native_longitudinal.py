@@ -22,8 +22,12 @@ class NativeLongitudinal:
       "availability": status, "applyStatus": status,
       "title": {"ko": "openpilot 종방향 제어", "en": "openpilot longitudinal control"},
       "description": {
-        "ko": "지원 차량에서 가속과 감속을 openpilot에 맡깁니다. P 정차 중 저장하면 다음 차량 세션에 적용됩니다.",
-        "en": "Use openpilot for acceleration and braking on supported vehicles. Save while stationary in Park for the next vehicle session.",
+        "ko": ("지원 차량에서 가속과 감속을 openpilot에 맡깁니다. P 정차 중 저장하면 다음 차량 세션에 적용됩니다. " +
+               "차량에 따라 순정 긴급 제동(AEB)·전방 충돌 경고(FCW)가 꺼질 수 있으며, " +
+               "켰을 때 유지되는지 차에서 확인되지 않은 차종도 있습니다(예: 아이오닉 9)."),
+        "en": ("Use openpilot for acceleration and braking on supported vehicles. Save while stationary in Park for the next vehicle session. " +
+               "Depending on the vehicle, stock AEB/FCW may be disabled; on some vehicles (e.g. IONIQ 9) whether they stay " +
+               "active has not been verified on the car."),
       },
     }
     if supported:
