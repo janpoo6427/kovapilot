@@ -36,6 +36,7 @@ def main() -> None:
   from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
   from openpilot.kovapilot.gateway.app import create_app
   from openpilot.kovapilot.gateway.camera import CameraSignaling
+  from openpilot.kovapilot.gateway.device_restart import REBOOT_KEY, DeviceRestart, restart_allowed
   from openpilot.kovapilot.gateway.git_maintenance import GitRepository
   from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE, load_lan_config, serve_lan
   from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
@@ -72,6 +73,8 @@ def main() -> None:
                                              and device_state_params.get("UpdaterState") == "idle"),
                       enqueue=lambda job: device_state_params.put(GIT_UPDATE_KEY, job, block=True)),
     lan_access=lan[0] if lan else None,
+    restart=DeviceRestart(partial(restart_allowed, device_state_params, PC),
+                          lambda: device_state_params.put_bool(REBOOT_KEY, True, block=True)),
   )
   if lan is None:
     web.run_app(app, host=LOOPBACK_HOST, port=args.port, access_log=None)

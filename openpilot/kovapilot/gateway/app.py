@@ -23,6 +23,7 @@ from openpilot.kovapilot.config.kova_params import (
   KovaParamsValidationError,
 )
 from openpilot.kovapilot.gateway.camera import camera_offer
+from openpilot.kovapilot.gateway.device_restart import DeviceRestart, RestartBlocked
 from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY
 from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
@@ -46,6 +47,7 @@ CAMERA_KEY = web.AppKey("camera", Callable)
 GIT_KEY = web.AppKey("git", GitRepository)
 GIT_LOCK_KEY = web.AppKey("git_lock", asyncio.Lock)
 NATIVE_LONGITUDINAL = web.AppKey("native_longitudinal", NativeLongitudinal)
+RESTART_KEY = web.AppKey("restart", DeviceRestart)
 
 
 class OffroadProvider(Protocol):
@@ -315,6 +317,9 @@ async def git_api(request):
       return _error(503, "git_busy", "repository inspection is in progress")
     async with lock:
       result = await asyncio.to_thread(callback, *args)
+    if action == "status":
+      restart = request.app.get(RESTART_KEY)
+      result = {**result, "restartEnabled": restart is not None and restart.enabled(_git_authorized(request))}
     return web.json_response({"branches": result} if action == "branches" else result)
   except (ValueError, TypeError):
     return _error(400, "invalid_git_request", "invalid Git parameters or target")
@@ -349,13 +354,27 @@ async def git_apply(request):
   return web.json_response(result, status=202)
 
 
+async def device_restart(request):
+  restart = request.app.get(RESTART_KEY)
+  if restart is None:
+    return _error(503, "restart_unavailable", "device restart is unavailable")
+  try:
+    await asyncio.to_thread(restart.restart, _git_authorized(request))
+  except RestartBlocked:
+    return _error(403, "restart_blocked", "restart requires authorized access while offroad and not finalizing an update")
+  except OSError:
+    return _error(503, "restart_unavailable", "device restart could not be requested")
+  return web.json_response({"restarting": True}, status=202)
+
+
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
                applied_lead_restart_provider: Callable[[], int | None] | None = None,
                applied_auto_engage_provider: Callable[[], dict | None] | None = None,
                dependency_conditions: Callable[[], dict[str, str]] | None = None,
-               telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None) -> web.Application:
+               telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None,
+               restart=None) -> web.Application:
   app = web.Application(client_max_size=MAX_REQUEST_BYTES, middlewares=[local_client])
   app[KOVA_PARAMS_STORE_KEY] = store
   app[OFFROAD_PROVIDER_KEY] = offroad_provider
@@ -384,6 +403,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[GIT_KEY] = git
   if native_longitudinal is not None:
     app[NATIVE_LONGITUDINAL] = native_longitudinal
+  if restart is not None:
+    app[RESTART_KEY] = restart
   app.on_shutdown.append(close_sockets)
   app.router.add_get("/v1/health", health)
   app.router.add_get("/v1/kova-params", get_kova_params)
@@ -393,4 +414,5 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
   app.router.add_get("/v1/git/{action:status|branches|log}", git_api)
   app.router.add_post("/v1/git/{action:plan|switch|reset}", git_api)
   app.router.add_post("/v1/git/apply", git_apply)
+  app.router.add_post("/v1/device/restart", device_restart)
   return app
