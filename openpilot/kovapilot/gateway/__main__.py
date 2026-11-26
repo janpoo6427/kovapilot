@@ -59,6 +59,7 @@ def main() -> None:
     parked_provider=telemetry.is_parked_and_disengaged, applied_cruise_provider=telemetry.applied_cruise_sync,
     applied_curve_provider=telemetry.applied_curve_slowdown,
     applied_lead_restart_provider=telemetry.applied_lead_restart,
+    applied_auto_engage_provider=telemetry.applied_auto_engage,
     dependency_conditions=partial(vehicle_dependency_conditions, device_state_params),
     telemetry=telemetry, camera=CameraSignaling(device_state_params),
     native_longitudinal=NativeLongitudinal(device_state_params, partial(vehicle_capability, device_state_params),

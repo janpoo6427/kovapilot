@@ -7,7 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, CURVE_SLOWDOWN_KEY, KOVA_PARAMS_KEY, KovaParamsStore
-from openpilot.kovapilot.config.kova_params import LEAD_RESTART_KEY
+from openpilot.kovapilot.config.kova_params import AUTO_ENGAGE_KEY, LEAD_RESTART_KEY
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
@@ -34,6 +34,31 @@ async def _with_client(test_case, *, is_offroad=True):
   app = create_app(KovaParamsStore(MemoryBackend()), lambda: is_offroad)
   async with TestClient(TestServer(app)) as client:
     await test_case(client)
+
+
+def test_auto_engage_is_saved_only_in_park_and_shows_both_axes():
+  parked = False
+  observed = {"value": 0, "lateral": "off", "longitudinal": "off"}
+  app = create_app(KovaParamsStore(MemoryBackend()), lambda: False, parked_provider=lambda: parked,
+                   applied_auto_engage_provider=lambda: observed)
+
+  async def check():
+    nonlocal parked
+    data = {"key": AUTO_ENGAGE_KEY, "value": 1, "expectedRevision": 0}
+    async with TestClient(TestServer(app)) as client:
+      assert (await client.post("/v1/kova-params/update", json=data)).status == 403
+      parked = True
+      response = await client.post("/v1/kova-params/update", json=data)
+      assert response.status == 200
+      item = next(s for s in (await response.json())["settings"] if s["key"] == AUTO_ENGAGE_KEY)
+      assert item["applyState"] == "pendingRestart"
+      observed.update(value=1, lateral="paused", longitudinal="active")
+      response = await client.get("/v1/kova-params")
+      item = next(s for s in (await response.json())["settings"] if s["key"] == AUTO_ENGAGE_KEY)
+      assert [s["state"] for s in item["runtimeStates"]] == ["paused", "active"]
+      assert item["applyState"] == "applied"
+
+  asyncio.run(check())
 
 
 def test_lead_restart_reports_saved_profile_and_applied_native_state():

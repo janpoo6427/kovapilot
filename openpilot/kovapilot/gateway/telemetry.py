@@ -3,6 +3,7 @@
 import math
 import time
 
+from openpilot.kovapilot.config.auto_engage_settings import applied_auto_engage
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
 from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
 from openpilot.kovapilot.config.lead_restart_settings import applied_lead_restart
@@ -76,6 +77,9 @@ class CerealTelemetry:
 
   def applied_lead_restart(self) -> int | None:
     return applied_lead_restart(self._running_pid("plannerd"))
+
+  def applied_auto_engage(self) -> dict | None:
+    return applied_auto_engage(self._running_pid("selfdrived"), time.monotonic_ns())
 
   def _running_pid(self, name: str) -> int | None:
     self.sm.update(0)

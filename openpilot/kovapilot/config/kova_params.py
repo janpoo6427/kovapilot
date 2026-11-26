@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 
 KOVA_PARAMS_KEY = "KovaParams"
+AUTO_ENGAGE_KEY = "engagement.auto_engage"
 BRIGHTNESS_MODE_KEY = "display.onroad_brightness_mode"
 BRIGHTNESS_MODE_AUTO, BRIGHTNESS_MODE_AUTO_DARK, BRIGHTNESS_MODE_FIXED = range(3)
 _LEGACY_BRIGHTNESS_MODES = {
@@ -209,7 +210,7 @@ def validate_catalog(catalog: Any) -> None:
       raise KovaParamsValidationError(f"invalid access for {setting['key']}")
     if setting.get("applyPolicy") not in ("immediate", "offroad", "parked", "restart"):
       raise KovaParamsValidationError(f"invalid applyPolicy for {setting['key']}")
-    if setting.get("savePolicy", "legacy") not in ("legacy", "anytime"):
+    if setting.get("savePolicy", "legacy") not in ("legacy", "anytime", "parked"):
       raise KovaParamsValidationError(f"invalid savePolicy for {setting['key']}")
     if setting.get("availability") not in ("available", "pendingConsumer", "unsupported"):
       raise KovaParamsValidationError(f"invalid availability for {setting['key']}")
@@ -305,6 +306,8 @@ class KovaParamsStore:
       raise KovaParamsValidationError(f"unknown setting: {key}")
     if setting["access"] != "readWrite" or (allowed_risks is not None and setting.get("risk") not in allowed_risks):
       raise KovaParamsReadOnlyError(f"setting is read-only: {key}")
+    if setting.get("savePolicy") == "parked" and not is_parked:
+      raise KovaParamsApplyPolicyError(f"setting can only be saved when parked and disengaged: {key}")
     if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "offroad" and not is_offroad:
       raise KovaParamsApplyPolicyError(f"setting can only be changed offroad: {key}")
     if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "parked" and not (is_offroad or is_parked):

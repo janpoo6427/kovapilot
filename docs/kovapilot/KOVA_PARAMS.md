@@ -45,6 +45,14 @@ The Gateway appends a `state` to each dependency in read and successful update r
 
 `tools/kovapilot/kovalink_gateway_dev.py` runs the same loopback-only application with an optional fixture catalog (`openpilot/kovapilot/tests/fixtures/kova_params_e2e.json`). It refuses to start without an isolated `PARAMS_ROOT` and always binds `127.0.0.1`. KovaLink's end-to-end transport test drives it and the real `python -m openpilot.kovapilot.gateway` entry point.
 
+## Automatic engagement
+
+`engagement.auto_engage` defaults to Off. Changes are saved while stationary in Park with driver assistance disengaged and loaded at the start of the next vehicle session. The Gateway exposes steering and cruise separately in `runtimeStates`.
+
+The automatic request requires an observed Park state, a fresh accelerator input in Drive, pedal release, and stable control readiness. The current speed must be in the normal cruise initialization range. The existing state machine handles the request only when panda already reports control authority. CANCEL, a complete disengagement, or a restart of selfdrived in the same vehicle session ends automatic attempts for that session.
+
+During an active engagement, the existing control loop continues to handle temporary steering and accelerator overrides. The automatic request does not grant independent steering or stock cruise authority.
+
 ## Lead restart response
 
 `cruise.lead_restart_response` defaults to `0` (Off). Values `1`, `2`, and `3` tune the initial departure delay and acceleration ramp during an active openpilot longitudinal session. Preferences are applied while stopped in Park with driver assistance disengaged. The Gateway reports the planner's applied value separately from the stored preference.

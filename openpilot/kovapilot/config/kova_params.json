@@ -61,6 +61,30 @@
       "requiredCapabilities": ["alwaysSteering"]
     },
     {
+      "key": "engagement.auto_engage",
+      "groupId": "steering",
+      "order": 80,
+      "type": "enum",
+      "control": "switch",
+      "options": [0, 1],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
+      "defaultValue": 0,
+      "title": {"ko": "자동 인게이지", "en": "Automatic engagement"},
+      "description": {
+        "ko": "지원 차량에서 다음 세션에 운전자가 먼저 출발하고 조향과 크루즈 제어 조건이 준비되면 한 번 자동으로 켭니다. 취소하거나 완전히 해제된 뒤에는 직접 다시 켭니다.",
+        "en": "On a supported vehicle, requests steering and cruise once in the next session after the driver starts driving and control is ready. Canceling or disengaging requires manual re-engagement."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "restart",
+      "savePolicy": "parked",
+      "availability": "available",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "openpilotCruiseSpeedOwner", "title": {"ko": "KOVA 크루즈 설정속도 제어", "en": "KOVA cruise set speed control"}}
+      ]
+    },
+    {
       "key": "navigation.speed_camera_profile",
       "dependencies": [
         {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},

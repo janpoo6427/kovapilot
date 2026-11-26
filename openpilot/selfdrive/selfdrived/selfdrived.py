@@ -15,6 +15,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
+from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
 from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
 
@@ -133,6 +134,7 @@ class SelfdriveD:
     self.dm_uncertain_alerted = False
     self.dm_disabled_prev = False
     self.state_machine = StateMachine()
+    self.auto_engage = None if REPLAY or SIMULATION else AutoEngageRuntime(self.CP, self.params)
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
     # Determine startup event
@@ -569,6 +571,10 @@ class SelfdriveD:
   def step(self):
     CS = self.data_sample()
     self.update_events(CS)
+    if self.auto_engage is not None and self.auto_engage.update(
+      CS, self.sm, self.events, initialized=self.initialized, enabled=self.enabled, now_ns=time.monotonic_ns(),
+    ):
+      self.events.add(EventName.buttonEnable)
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
     self.update_alerts(CS)

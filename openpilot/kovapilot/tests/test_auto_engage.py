@@ -1,0 +1,131 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+from opendbc.car.structs import car
+
+from openpilot.cereal import log
+from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime
+from openpilot.kovapilot.config import auto_engage_settings
+from openpilot.kovapilot.config.kova_params import AUTO_ENGAGE_KEY
+from openpilot.selfdrive.selfdrived import selfdrived
+from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.selfdrive.selfdrived.state import StateMachine
+
+
+class Inputs(dict):
+  pass
+
+
+def _runtime(monkeypatch, tmp_path, *, requested=True, stock=False):
+  monkeypatch.setattr(auto_engage_settings, "status_path", lambda: tmp_path / "auto-engage.json")
+  cp = car.CarParams.new_message(pcmCruise=stock, openpilotLongitudinalControl=not stock,
+                                safetyConfigs=[{"safetyModel": "hyundai", "safetyParam": 1}])
+  params = SimpleNamespace(get=lambda key, **kwargs: 40 if key == "InitialCruiseSpeedKph" else {
+    "schemaVersion": 1, "revision": 0, "values": {AUTO_ENGAGE_KEY: int(requested)},
+  })
+  sm = Inputs(
+    deviceState=log.DeviceState.new_message(started=True, startedMonoTime=1_000_000_000),
+    pandaStates=[log.PandaState.new_message(safetyModel="hyundai", safetyParam=1, controlsAllowed=True)],
+    driverMonitoringState=log.DriverMonitoringState.new_message(),
+    longitudinalPlan=log.LongitudinalPlan.new_message(),
+    carControl=car.CarControl.new_message(),
+    modelV2=log.ModelDataV2.new_message(),
+  )
+  sm.valid = dict.fromkeys(sm, True)
+  sm.alive = dict.fromkeys(sm, True)
+  sm.logMonoTime = {}
+  sd = SelfdriveStep(monkeypatch, cp, params, sm)
+  return sd
+
+
+class SelfdriveStep:
+  def __init__(self, monkeypatch, cp, params, sm):
+    self.now_ns = 1_100_000_000
+    self.cs = car.CarState.new_message(canValid=True, gearShifter="park", standstill=True, cruiseState={"available": True})
+    self.sd = object.__new__(selfdrived.SelfdriveD)
+    self.sd.CP, self.sd.sm = cp, sm
+    self.sd.params = params
+    self.sd.auto_engage = AutoEngageRuntime(cp, params)
+    self.sd.initialized = True
+    self.sd.enabled = self.sd.active = False
+    self.sd.state_machine = StateMachine()
+    self.sd.data_sample = lambda: self.cs
+    self.sd.update_events = Mock()
+    self.sd.update_alerts = Mock()
+    self.sd.publish_selfdriveState = Mock()
+    monkeypatch.setattr(selfdrived.time, "monotonic_ns", lambda: self.now_ns)
+
+  def step(self, event=None):
+    self.now_ns += 100_000_000
+    self.sd.events = Events()
+    if event is not None:
+      self.sd.events.add(event)
+    self.sd.sm.logMonoTime.update(dict.fromkeys(self.sd.sm, self.now_ns))
+    self.sd.step()
+    return self.sd.enabled
+
+  def depart(self, *, speed=15.0):
+    assert not self.step()
+    self.cs.gearShifter = "drive"
+    self.cs.standstill = False
+    self.cs.vEgo = speed
+    assert not self.step()
+    self.cs.gasPressed = True
+    assert not self.step()
+    self.cs.gasPressed = False
+
+
+def test_production_state_machine_starts_once_then_observes_axis_pause(monkeypatch, tmp_path):
+  runtime = _runtime(monkeypatch, tmp_path)
+  runtime.depart()
+  for _ in range(10):
+    assert not runtime.step()
+  assert runtime.step()
+  controls = runtime.sd.sm["carControl"]
+  controls.latActive = True
+  assert runtime.step()
+  status = auto_engage_settings.read_auto_engage_status()
+  assert (status["lateral"], status["longitudinal"]) == ("active", "paused")
+  controls.longActive = True
+  assert runtime.step()
+  assert auto_engage_settings.read_auto_engage_status()["longitudinal"] == "active"
+  assert not runtime.step(log.OnroadEvent.EventName.buttonCancel)
+  for _ in range(14):
+    assert not runtime.step()
+  assert auto_engage_settings.read_auto_engage_status()["longitudinal"] == "manualRequired"
+
+
+def test_denied_authority_or_speed_floor_never_requests_enable(monkeypatch, tmp_path):
+  runtime = _runtime(monkeypatch, tmp_path)
+  runtime.depart(speed=8.0)
+  for _ in range(15):
+    assert not runtime.step()
+  runtime.cs.vEgo = 15.0
+  runtime.sd.sm["pandaStates"][0].controlsAllowed = False
+  for _ in range(15):
+    assert not runtime.step()
+
+
+def test_fault_and_same_session_restart_require_manual_enable(monkeypatch, tmp_path):
+  runtime = _runtime(monkeypatch, tmp_path)
+  runtime.depart()
+  assert not runtime.step(log.OnroadEvent.EventName.relayMalfunction)
+  for _ in range(15):
+    assert not runtime.step()
+  runtime.sd.auto_engage = AutoEngageRuntime(runtime.sd.CP, runtime.sd.params)
+  runtime.cs.gearShifter = "park"
+  runtime.cs.standstill = True
+  runtime.cs.vEgo = 0.0
+  runtime.depart()
+  for _ in range(15):
+    assert not runtime.step()
+  assert runtime.step(log.OnroadEvent.EventName.buttonEnable)
+
+
+def test_disabled_preference_and_stock_acc_preserve_existing_entry(monkeypatch, tmp_path):
+  for requested, stock in ((False, False), (True, True)):
+    runtime = _runtime(monkeypatch, tmp_path, requested=requested, stock=stock)
+    runtime.depart()
+    for _ in range(15):
+      assert not runtime.step()
+    assert runtime.step(log.OnroadEvent.EventName.buttonEnable)
