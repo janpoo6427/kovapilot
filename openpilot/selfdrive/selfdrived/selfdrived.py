@@ -21,6 +21,7 @@ from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
 from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
 
 from openpilot.selfdrive.car.car_events import CarEvents
+from openpilot.selfdrive.controls.lib.latcontrol_angle import angle_held_at_limit, get_angle_hold_limit, steer_saturated_alert
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
@@ -123,6 +124,7 @@ class SelfdriveD:
     self.mismatch_counter = 0
     self.cruise_mismatch_counter = 0
     self.last_steering_pressed_frame = 0
+    self.angle_hold_limit = get_angle_hold_limit(self.CP)
     self.distance_traveled = 0
     self.last_functional_fan_frame = 0
     self.events_prev = []
@@ -455,8 +457,11 @@ class SelfdriveD:
       desired_lateral_accel = self.sm['modelV2'].action.desiredCurvature * (clipped_speed**2)
       undershooting = abs(desired_lateral_accel) / abs(1e-3 + actual_lateral_accel) > 1.2
       turning = abs(desired_lateral_accel) > 1.0
+      # held at the angle limit (Hyundai CAN-FD angle): any speed, no lateral accel condition
+      held_at_limit = (controlstate.lateralControlState.which() == 'angleState' and
+                       angle_held_at_limit(self.angle_hold_limit, lac.steeringAngleDesiredDeg))
       # TODO: lac.saturated includes speed and other checks, should be pulled out
-      if undershooting and turning and lac.saturated:
+      if steer_saturated_alert(lac.saturated, undershooting, turning, held_at_limit):
         self.events.add(EventName.steerSaturated)
 
     # Check for FCW

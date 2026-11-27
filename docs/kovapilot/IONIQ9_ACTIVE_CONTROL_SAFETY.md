@@ -36,19 +36,28 @@ The replacement changes only counter, angle-control state, requested angle, and 
 
 ## Angle safety contract
 
-- Active state is exactly 2 with gain raw 250; inactive state is exactly 1 with gain 0.
-- Active control requires MDPS compensated angle samples strictly inside ±60 degrees.
-- The controller clamps active planner requests to ±59.9 degrees; at a measured ±60-degree boundary it sends measured-follow inactive state.
-- Active control is blocked when driver torque samples exceed ±250.
+- Active state is exactly 2 with gain raw 1–250 (the MDPS torque ceiling); inactive state is exactly 1 with gain 0.
+- Active control continues up to the ±175-degree command limit. The controller clamps planner requests to ±175 degrees and holds the command there instead of releasing; a request past the limit raises `steerSaturated` ("Take Control" / "Turn Exceeds Steering Limit") after 0.4 s at any speed, unless the driver steered in the last 2 s.
+- The controller sends measured-follow inactive state only when the measured angle is past ±183 degrees (175 + the 8-degree measured error), i.e. the driver turned the wheel past the limit.
+- Driver torque and `steeringPressed` do not release control. They lower the MDPS torque ceiling (`ADAS_ACIAnglTqRedcGainVal`) by a speed-dependent table (floor 0.1–0.3, ceiling 0.85, down 0.014 per frame). After the driver lets go the ceiling recovers from floor to ceiling in 0.5 s; an intervention (`steeringPressed` 0.3 s) within 5 s of a full recovery slows the next recovery to 1, 2 and 3 s, and 5 s without one resets it.
+- panda does not block active frames on driver torque.
+- panda bounds active requests by lateral acceleration and jerk (vehicle model, 3.59 m/s² and 3.59 m/s³ at the lowest seen speed − 1 m/s; IONIQ 9 slip factor, steer ratio 16.02, wheelbase 3.13 m) instead of a fixed angle and speed table. The controller uses the same 3.6 m/s² / 3.6 m/s³ limits, 1.2 degrees per frame and the speed table.
 - Requested angle has a hard ±175-degree encoding/inactive clamp.
-- Speed-dependent wind-up/down rates are enforced.
-- Active request must remain within ±10 degrees of MDPS measured angle.
+- Active request must remain within ±10 degrees of MDPS measured angle (controller: ±8 degrees).
 - Inactive request must follow the measured angle, clamped to the encoding limit.
 - MDPS invalid angle or warning/LKA/ACI fault clears controls.
 - CRC, monotonic 8-bit counter with one-frame resynchronization, nominal frequency, relay malfunction, forwarding, controls-off, state, gain, and stock payload are checked.
 - A rejected protocol/measurement/frequency frame cannot advance the desired-angle limiter state.
 
-The 60-degree active boundary is intentionally more conservative than the observed Carrot implementation, which often reduces gain rather than becoming inactive at higher angle or during driver intervention.
+The earlier ±60-degree active boundary and the driver-torque release (225 for one frame, or `steeringPressed`) were removed on 2026-11-27 (ramp and tight-turn releases). Carrot and sunnypilot also command up to 175 degrees on `0xCB` and reduce gain instead of releasing.
+
+Sources (behavior reference; the code is ours):
+
+- Torque reduction gain curve from sunnypilot opendbc `hkg-angle-steering-2025` `compute_torque_reduction_gain` (MIT).
+- Recovery time from carrot `47b1d34` `carcontroller.py` (MIT), without its model-uncertainty term.
+- panda lateral acceleration/jerk check follows the sunnypilot `hkg-angle-steering-2025` behavior with the same IONIQ 9 values.
+
+Vehicle limits not yet confirmed by logs: the DBC lists the `0xCB` requested-angle range as 0–119.9 ("Capped at 119.9"); whether the MDPS follows requests above 120 degrees, and whether it faults between 120 and 175 degrees, still needs vehicle logs.
 
 ## Evidence limits
 

@@ -19,9 +19,10 @@ class LatControl(ABC):
   def reset(self):
     self.sat_time = 0.
 
-  def _check_saturation(self, saturated, CS, steer_limited_by_safety, curvature_limited):
+  def _check_saturation(self, saturated, CS, steer_limited_by_safety, curvature_limited, any_speed=False):
     # Saturated only if control output is not being limited by car torque/angle rate limits
-    if (saturated or curvature_limited) and CS.vEgo > self.sat_check_min_speed and not steer_limited_by_safety and not CS.steeringPressed:
+    if (saturated or curvature_limited) and (CS.vEgo > self.sat_check_min_speed or any_speed) and not steer_limited_by_safety and \
+       not CS.steeringPressed:
       self.sat_time += self.dt
     else:
       self.sat_time -= self.dt
