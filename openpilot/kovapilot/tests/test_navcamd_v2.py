@@ -117,3 +117,34 @@ def test_navigation_state_turn_by_turn_and_route():
   nav.step(2 * SEC)
   assert nav.navigation(2 * SEC)["current"] == {"valid": False, "turnType": -1}
   assert stream_handle("guidance_current") == 2
+
+
+def test_v2_turn_by_turn_feeds_the_navigation_turn_signal():
+  from types import SimpleNamespace
+  from openpilot.kovapilot.navigation.nav_blinker import RIGHT, NavBlinker, guidance_from_navigation, start_distance
+
+  nav = NavCamera(None, session="s")
+  app = App(nav)
+  app.send("guidance_current", {"distance_m": 400, "turn_type": 101, "main_text": "오른쪽 방향"}, SEC)  # exit right
+  app.send("speed", {"road_limit_kph": 100}, SEC)
+  nav.step(SEC)
+  reader = messaging.log_from_bytes(navigation_message(nav.navigation(SEC)).to_bytes()).kovaNavigation
+  guidance = guidance_from_navigation(reader)
+  assert (guidance.side, guidance.distance_m, guidance.road_limit_kph) == (RIGHT, 400.0, 100.0)
+  blinker = NavBlinker()
+  car = SimpleNamespace(leftBlinker=False, rightBlinker=False, steeringPressed=False, steeringTorque=0.0)
+  blinker.receive(guidance, SEC)
+  assert blinker.request(SEC, car) is None  # 400 m > 350 m start distance at 100 km/h
+  for tick in range(11):  # 60 m driven in 2 s since the report
+    nav.update_speed(SEC + tick * SEC // 5, 30.0)
+  nav.step(3 * SEC)
+  closer = guidance_from_navigation(messaging.log_from_bytes(navigation_message(nav.navigation(3 * SEC)).to_bytes()).kovaNavigation)
+  assert closer.distance_m == 340.0 <= start_distance(100)
+  blinker.receive(closer, 3 * SEC)
+  assert blinker.request(3 * SEC, car) == RIGHT
+  # an intersection turn, the old app, no guide point or off route: no request
+  for state in ({"source": "carrotV2", "current": {"valid": True, "turnType": 12, "distanceM": 100.0}},
+                {"source": "carrotLegacy"}, {"source": "carrotV2"},
+                {"source": "carrotV2", "offRoute": True, "current": {"valid": True, "turnType": 101, "distanceM": 100.0}}):
+    assert guidance_from_navigation(messaging.log_from_bytes(navigation_message(state).to_bytes()).kovaNavigation) is None
+  assert guidance_from_navigation(None) is None

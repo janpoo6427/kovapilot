@@ -1,10 +1,10 @@
 """KOVA navigation turn signal (navigation.auto_blinker).
 
-When the carrot-compatible navigation app (navcamd, UDP 7706) announces a fork or an exit, request the turn signal
-on that side; the lit turn signal then goes through the automatic lane change conditions in DesireHelper exactly as
-a driver's turn signal (kovapilot/lateral/auto_lane_change.py). Guidance fields and turn types follow carrot
-carrot_serv._update_tbt (nTBTTurnType, nTBTDist, nRoadLimitSpeed); the start distance follows carrot
-update_auto_turn (start_fork_dist).
+When the carrot-compatible navigation app (UDP 7706 datagram, or WebSocket v2 via kovaNavigation) announces a fork
+or an exit, request the turn signal on that side; the lit turn signal then goes through the automatic lane change
+conditions in DesireHelper exactly as a driver's turn signal (kovapilot/lateral/auto_lane_change.py). Guidance
+fields and turn types follow carrot carrot_serv._update_tbt (nTBTTurnType, nTBTDist, nRoadLimitSpeed); the start
+distance follows carrot update_auto_turn (start_fork_dist).
 
 No vehicle can turn the turn signal on from openpilot yet, so nav_blinker_output_supported() is false everywhere,
 the gateway reports the setting as unsupported and nothing sends a turn-signal frame:
@@ -71,6 +71,22 @@ def parse_guidance(data: bytes) -> Guidance | None:
   if side is None or not 0 < distance <= MAX_GUIDANCE_DISTANCE_M:
     return None
   return Guidance(side, float(distance), float(max(limit, 0)))
+
+
+def guidance_from_navigation(navigation) -> Guidance | None:
+  """Fork/exit guidance from kovaNavigation (navcamd, carrot modified TMAP over WebSocket v2): the same turn types
+  and distance limits as parse_guidance. The current guide distance there follows wheel distance between reports."""
+  try:
+    if str(navigation.source) != "carrotV2" or navigation.offRoute or not navigation.current.valid:
+      return None
+    side = TURN_TYPES.get(navigation.current.turnType)
+    distance = float(navigation.current.distanceM)
+    limit = float(navigation.roadLimitKph)
+  except (AttributeError, TypeError, ValueError):
+    return None
+  if side is None or not 0 < distance <= MAX_GUIDANCE_DISTANCE_M:
+    return None
+  return Guidance(side, distance, limit)
 
 
 class NavBlinker:

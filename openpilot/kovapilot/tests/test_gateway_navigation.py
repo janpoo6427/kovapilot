@@ -63,11 +63,15 @@ def test_auto_lane_change_state_in_this_build_and_with_the_automatic_lane_change
   state = auto_lane_change_fields(model.modelV2, car.carState, 1)["autoLaneChange"]
   assert state["setting"] == "on" and state["laneChange"] == "preLaneChange" and state["direction"] == "left"
   assert state["blindSpotLeft"] is True and state["blindSpotRight"] is False
-  # fields this build may not have yet are "unknown" / None, never invented
-  if not hasattr(model.modelV2.meta, "kovaAutoLaneChange"):
-    assert state["auto"] == "unknown"
-  if not hasattr(car.carState, "blindspotFresh"):
-    assert state["blindSpotFresh"] is None
+  assert state["auto"] == "none" and state["blindSpotFresh"] is False
+  model.modelV2.meta.kovaAutoLaneChange = "pending"
+  car.carState.blindspotFresh = True
+  state = auto_lane_change_fields(model.modelV2, car.carState, 1)["autoLaneChange"]
+  assert (state["auto"], state["blindSpotFresh"]) == ("pending", True)
+  # fields a build does not have are "unknown" / None, never invented
+  state = auto_lane_change_fields(SimpleNamespace(meta=SimpleNamespace(laneChangeState="off", laneChangeDirection="none")),
+                                  SimpleNamespace(leftBlindspot=False, rightBlindspot=False), 1)["autoLaneChange"]
+  assert (state["auto"], state["blindSpotFresh"], state["laneChange"]) == ("unknown", None, "off")
   meta = SimpleNamespace(laneChangeState="laneChangeStarting", laneChangeDirection="right", kovaAutoLaneChange="returning")
   car_state = SimpleNamespace(leftBlindspot=False, rightBlindspot=True, blindspotFresh=True)
   state = auto_lane_change_fields(SimpleNamespace(meta=meta), car_state, 0)["autoLaneChange"]
