@@ -2577,6 +2577,40 @@ struct KovaCameraEvent {
   }
 }
 
+# Turn-by-turn guidance of a local navigation app (kovapilot/navigation/navcamd.py), for
+# KovaLink and the navigation turn signal. Values come from the app; nothing is estimated
+# except the current guide distance, which follows wheel distance between reports.
+struct KovaNavigation {
+  source @0 :Source;
+  appVersion @1 :Text;
+  lastReceivedMonoTime @2 :UInt64;  # last packet from the app, nanoseconds; 0 never
+  guidanceActive @3 :Bool;
+  offRoute @4 :Bool;
+  current @5 :Guide;
+  next @6 :Guide;  # distanceM counts from the current guide point
+  roadLimitKph @7 :UInt16;  # 0 unknown
+  routeValid @8 :Bool;
+  remainingDistanceM @9 :UInt32;
+  remainingTimeS @10 :UInt32;
+
+  struct Guide {
+    valid @0 :Bool;
+    turnType @1 :Int32;  # TMAP turn code (carrot nTBTTurnType), -1 none
+    distanceM @2 :Float32;
+    timeS @3 :Float32;
+    mainText @4 :Text;
+    roadName @5 :Text;
+    nearDirection @6 :Text;
+    farDirection @7 :Text;
+  }
+
+  enum Source {
+    none @0;
+    carrotV2 @1;  # carrot modified TMAP, WebSocket v2 on TCP 7714
+    carrotLegacy @2;  # UDP 7706 JSON: cameras only, no guidance here
+  }
+}
+
 struct Event {
   logMonoTime @0 :UInt64;  # nanoseconds
   valid @67 :Bool = true;
@@ -2765,6 +2799,7 @@ struct Event {
     navInstruction @82 :NavInstruction;
     navRoute @83 :NavRoute;
     kovaCameraEvents @154 :List(KovaCameraEvent);
+    kovaNavigation @155 :KovaNavigation;
     navThumbnailDEPRECATED @84 :Thumbnail;
     gnssMeasurementsDEPRECATED @91 :GnssMeasurements;
     mapRenderStateDEPRECATED @105: MapRenderState;

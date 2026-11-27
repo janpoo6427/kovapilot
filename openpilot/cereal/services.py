@@ -55,6 +55,7 @@ _services: dict[str, tuple] = {
   "navInstruction": (True, 1., 10),
   "navRoute": (True, 0.),
   "kovaCameraEvents": (True, 0.),
+  "kovaNavigation": (True, 5.),
   "ubloxGnss": (True, 10.),
   "qcomGnss": (True, 2.),
   "clocks": (True, 0.1, 1),

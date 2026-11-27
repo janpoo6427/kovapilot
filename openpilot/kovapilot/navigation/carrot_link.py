@@ -276,14 +276,15 @@ class CarrotApp:
   remote: tuple[str, int] | None = None
 
   def receive(self, data: bytes, address: tuple[str, int], now_ns: int, odo_m: float,
-              network: ipaddress.IPv4Network | None) -> str:
+              network: ipaddress.IPv4Network | None, observe: bool = True) -> str:
+    """observe=False: the WebSocket v2 app reports the cameras, this packet only keeps the app connected."""
     if not lan_peer(address[0], network):
       return "rejected_address"
     packet = parse_packet(data)
     if packet is None:
       return "rejected_packet"
     self.last_packet_ns, self.remote = now_ns, address
-    if packet.sdi:
+    if packet.sdi and observe:
       self.last_sdi_ns = now_ns
       self.tracker.observe(packet.items, now_ns, odo_m)
     return "accepted"
