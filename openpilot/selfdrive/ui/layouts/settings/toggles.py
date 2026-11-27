@@ -89,7 +89,7 @@ class TogglesLayout(Widget):
       buttons=[lambda: tr("Aggressive"), lambda: tr("Standard"), lambda: tr("Relaxed")],
       button_width=255,
       callback=self._set_longitudinal_personality,
-      selected_index=self._params.get("LongitudinalPersonality", return_default=True),
+      selected_index=min(self._params.get("LongitudinalPersonality", return_default=True), 2),
       icon="speed_limit.png"
     )
 
@@ -143,7 +143,7 @@ class TogglesLayout(Widget):
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
       if personality != ui_state.personality and ui_state.started:
-        self._long_personality_setting.action_item.set_selected_button(personality)
+        self._long_personality_setting.action_item.set_selected_button(min(personality, 2))
       ui_state.personality = personality
 
   def show_event(self):

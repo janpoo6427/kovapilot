@@ -151,6 +151,7 @@ enum LongitudinalPersonality {
   aggressive @0;
   standard @1;
   relaxed @2;
+  moreRelaxed @3;  # KOVA: fourth (farthest) distance level, only on cars whose own cruise gap has four levels
 }
 
 struct InitData {
@@ -844,6 +845,9 @@ struct SelfdriveState {
   # KOVA always-on lateral (steering.always_on): engaged once requested, active while it may steer
   alwaysOnLateralEngaged @14 :Bool;
   alwaysOnLateralActive @15 :Bool;
+
+  # KOVA distance button levels: 3, or 4 once the car reported its own cruise gap level 4 (carState.pcmCruiseGap)
+  personalityLevels @16 :UInt8;
 
   enum AudibleAlert {
     none @0;

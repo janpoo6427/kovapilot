@@ -2,6 +2,7 @@
 import bisect
 import math
 import os
+import re
 from enum import IntEnum
 from collections.abc import Callable
 
@@ -396,7 +397,7 @@ def longitudinal_maneuver_alert(CP: car.CarParams, CS: car.CarState, sm: messagi
 
 
 def personality_changed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  personality = str(personality).title()
+  personality = re.sub(r"(?<!^)(?=[A-Z])", " ", str(personality)).title()  # moreRelaxed -> More Relaxed
   return NormalPermanentAlert(f"Driving Personality: {personality}", duration=1.5)
 
 

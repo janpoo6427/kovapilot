@@ -18,7 +18,7 @@ from openpilot.common.gps import get_gps_location_service
 from openpilot.kovapilot.bridges.always_lateral_runtime import AlwaysLateralRuntime
 from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
-from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
+from openpilot.kovapilot.config.longitudinal_personality import CruiseGapLevels, clamp_personality, get_longitudinal_personality
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.controls.lib.latcontrol_angle import angle_held_at_limit, get_angle_hold_limit, steer_saturated_alert
@@ -130,7 +130,8 @@ class SelfdriveD:
     self.events_prev = []
     self.logged_comm_issue = None
     self.not_running_prev = None
-    self.personality = get_longitudinal_personality(self.params)
+    self.gap_levels = CruiseGapLevels(self.params, self.CP.carFingerprint)
+    self.personality = clamp_personality(get_longitudinal_personality(self.params), self.gap_levels.levels)
     self.recalibrating_seen = False
     self.startup_cruise_checked = False
     self.dm_lockout_set = False
@@ -484,12 +485,22 @@ class SelfdriveD:
       if self.sm['modelV2'].frameDropPerc > 1 and not big_model_settling:
         self.events.add(EventName.modeldLagging)
 
-    # Decrement personality on distance button press
+    self.update_personality(CS)
+
+  def update_personality(self, CS):
+    # Decrement personality on distance button press. A car that reported its own gap level 4 has four levels and
+    # follows the car's own level one to one; every other car keeps the three stock levels.
     if self.CP.openpilotLongitudinalControl:
+      car_personality = self.gap_levels.update(CS.pcmCruiseGap)
       if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
-        self.personality = (self.personality - 1) % 3
-        self.params.put('LongitudinalPersonality', self.personality)
-        self.events.add(EventName.personalityChanged)
+        self.set_personality(self.gap_levels.next_personality(self.personality))
+      elif car_personality is not None and car_personality != self.personality:
+        self.set_personality(car_personality)
+
+  def set_personality(self, personality):
+    self.personality = personality
+    self.params.put('LongitudinalPersonality', self.personality)
+    self.events.add(EventName.personalityChanged)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
@@ -561,6 +572,7 @@ class SelfdriveD:
     ss.state = self.state_machine.state
     ss.engageable = not self.events.contains(ET.NO_ENTRY)
     ss.personality = self.personality
+    ss.personalityLevels = self.gap_levels.levels
     if self.always_lateral is not None:
       ss.alwaysOnLateralEngaged = self.always_lateral.engaged
       ss.alwaysOnLateralActive = self.always_lateral.active
@@ -608,7 +620,7 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      self.personality = get_longitudinal_personality(self.params)
+      self.personality = clamp_personality(get_longitudinal_personality(self.params), self.gap_levels.levels)
       time.sleep(0.1)
 
   def run(self):

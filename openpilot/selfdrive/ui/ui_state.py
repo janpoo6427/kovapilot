@@ -7,7 +7,8 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
-from openpilot.kovapilot.config.longitudinal_personality import get_longitudinal_personality
+from openpilot.kovapilot.config.longitudinal_personality import FOUR_GAP_LEVELS, FOUR_LEVEL_CAR_PARAM, GAP_LEVELS, \
+  get_longitudinal_personality
 from openpilot.kovapilot.display.brightness import DEFAULT_SETTINGS as DEFAULT_DISPLAY_BRIGHTNESS, load_display_brightness, onroad_brightness
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
@@ -117,6 +118,7 @@ class UIState:
     self.personality: log.LongitudinalPersonality = log.LongitudinalPersonality.standard
     self.has_longitudinal_control: bool = False
     self.personality_param: int = log.LongitudinalPersonality.standard
+    self.personality_levels_param: int = GAP_LEVELS  # offroad: distance levels remembered for this car
     self.is_body: bool | None = False
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
@@ -270,6 +272,8 @@ class UIState:
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.personality_param = get_longitudinal_personality(self.params)
+    four = self.CP is not None and bool(self.CP.carFingerprint) and self.params.get(FOUR_LEVEL_CAR_PARAM) == self.CP.carFingerprint
+    self.personality_levels_param = FOUR_GAP_LEVELS if four else GAP_LEVELS
     self.display_brightness = load_display_brightness(self.params)
     self.navigation_enabled = self.params.get_bool("NavigationEnabled")
     self.nav_destination_set = self.params.get("NavDestination") is not None

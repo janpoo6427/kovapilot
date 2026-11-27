@@ -1,6 +1,7 @@
 import raylib_nb as rl
 from openpilot.cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.kovapilot.config.longitudinal_personality import clamp_personality
 from openpilot.selfdrive.ui.mici.onroad import DIMMED_ICON_ALPHA
 from openpilot.selfdrive.ui.mici.onroad.status import status_fade
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -8,6 +9,8 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import Widget
 
 HIGHLIGHT_TIME = 2.5  # seconds
+# bar centers: the stock three, and four on a car whose own cruise gap has four levels (kept above the steering wheel)
+BAR_Y = {3: (122, 136, 152), 4: (118, 131, 146, 163)}
 
 
 class LongIndicator(Widget):
@@ -16,12 +19,13 @@ class LongIndicator(Widget):
     self._txt_lead_car = (self._texture('car', 35, 27), self._texture('car_green', 50, 42))
     self._txt_distance = [(self._texture('distance_1', 32, 7), self._texture('distance_1_green', 60, 35)),
                           (self._texture('distance_2', 40, 9), self._texture('distance_2_green', 68, 37)),
-                          (self._texture('distance_3', 48, 11), self._texture('distance_3_green', 76, 39))]
+                          (self._texture('distance_3', 48, 11), self._texture('distance_3_green', 76, 39)),
+                          (self._texture('distance_4', 56, 13), self._texture('distance_4_green', 84, 41))]
     self._alpha_filter = FirstOrderFilter(0.0, 0.05, 1 / gui_app.target_fps)
     # crossfade between states, a white and a green filter per icon
     self._lead_car_filters = (FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps), FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps))
     self._distance_filters = [(FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps), FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps))
-                              for _ in range(3)]
+                              for _ in range(4)]
     self._personality: int | None = None
     self._personality_changed_time = -HIGHLIGHT_TIME
     self._should_draw = False
@@ -67,7 +71,12 @@ class LongIndicator(Widget):
   def _draw_distance_bars(self, rect: rl.Rectangle, alpha: float, visible: bool) -> None:
     sm = ui_state.sm
     now = rl.get_time()
-    personality = sm['selfdriveState'].personality.raw if ui_state.started else ui_state.personality_param
+    if ui_state.started:
+      personality = sm['selfdriveState'].personality.raw
+      levels = 4 if sm['selfdriveState'].personalityLevels == 4 else 3
+    else:
+      personality, levels = ui_state.personality_param, ui_state.personality_levels_param
+    personality = clamp_personality(personality, levels)
     if self._personality is not None and personality != self._personality:
       self._personality_changed_time = now
     self._personality = personality
@@ -77,7 +86,8 @@ class LongIndicator(Widget):
     highlight = now - self._personality_changed_time < HIGHLIGHT_TIME
 
     count = personality + 1
-    for i, ((white, green), y, (active_f, green_f)) in enumerate(zip(self._txt_distance, (122, 136, 152), self._distance_filters, strict=True)):
+    bars = zip(self._txt_distance[:levels], BAR_Y[levels], self._distance_filters[:levels], strict=True)
+    for i, ((white, green), y, (active_f, green_f)) in enumerate(bars):
       active = active_f.update(float(i < count))
       green_alpha = green_f.update(float(highlight and i == count - 1))
       self._draw_centered(white, rect, y, (0.35 * (1 - active) + 0.9 * (active - green_alpha)) * alpha)

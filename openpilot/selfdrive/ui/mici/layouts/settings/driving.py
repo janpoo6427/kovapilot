@@ -59,7 +59,7 @@ class DrivingLayoutMici(NavScroller):
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
       if personality != ui_state.personality and ui_state.started:
-        self._personality_toggle.set_value(self._personality_toggle._options[personality])
+        self._personality_toggle.set_value(self._personality_toggle._options[min(personality, len(self._personality_toggle._options) - 1)])
       ui_state.personality = personality
 
   def show_event(self):

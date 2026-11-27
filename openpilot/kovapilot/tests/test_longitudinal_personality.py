@@ -29,18 +29,18 @@ def test_normalize_accepts_upstream_personalities():
 
 def test_normalize_rejects_legacy_and_malformed_values():
   assert DEFAULT_PERSONALITY == int(log.LongitudinalPersonality.standard)
-  for value in (3, -1, 100, None, "1"):
+  for value in (4, -1, 100, None, "1"):
     assert normalize_longitudinal_personality(value) == DEFAULT_PERSONALITY
 
 
 def test_get_is_defensive_without_mutating():
-  params = FakeParams(3)
+  params = FakeParams(4)
   assert get_longitudinal_personality(params) == DEFAULT_PERSONALITY
   assert params.puts == []
 
 
 def test_migration_repairs_legacy_value_once():
-  params = FakeParams(3)
+  params = FakeParams(4)
   assert migrate_longitudinal_personality(params)
   assert params.puts == [("LongitudinalPersonality", DEFAULT_PERSONALITY, True)]
   assert not migrate_longitudinal_personality(params)
