@@ -4,6 +4,7 @@ import threading
 from openpilot.common.params import Params
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
+from openpilot.kovapilot.config.power_off_settings import AUTO_POWER_OFF_READ_INTERVAL_S, auto_power_off_limit_s
 
 CAR_VOLTAGE_LOW_PASS_K = 0.011 # LPF gain for 45s tau (dt/tau / (dt/tau + 1))
 
@@ -12,7 +13,7 @@ CAR_BATTERY_CAPACITY_uWh = 30e6
 CAR_CHARGING_RATE_W = 45
 
 VBATT_PAUSE_CHARGING = 11.8           # Lower limit on the LPF car battery voltage
-MAX_TIME_OFFROAD_S = 30*3600
+MAX_TIME_OFFROAD_S = 24*3600        # Used when no valid KovaLink automatic power-off time is saved
 MIN_ON_TIME_S = 3600
 DELAY_SHUTDOWN_TIME_S = 300 # Wait at least DELAY_SHUTDOWN_TIME_S seconds after offroad_time to shutdown.
 VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S = 60
@@ -27,6 +28,8 @@ class PowerMonitoring:
     self.car_voltage_mV = 12e3                  # Low-passed version of peripheralState voltage
     self.car_voltage_instant_mV = 12e3          # Last value of peripheralState voltage
     self.integration_lock = threading.Lock()
+    self.offroad_limit_s = MAX_TIME_OFFROAD_S   # KovaLink automatic power-off time, inf for always on
+    self.next_offroad_limit_read = None
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity") or 0
 
@@ -102,6 +105,12 @@ class PowerMonitoring:
   def get_car_battery_capacity(self) -> int:
     return int(self.car_battery_capacity_uWh)
 
+  def _offroad_limit(self, now: float) -> float:
+    if self.next_offroad_limit_read is None or now >= self.next_offroad_limit_read:
+      self.offroad_limit_s = auto_power_off_limit_s(self.params, MAX_TIME_OFFROAD_S)
+      self.next_offroad_limit_read = now + AUTO_POWER_OFF_READ_INTERVAL_S
+    return self.offroad_limit_s
+
   # See if we need to shutdown
   def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool):
     if offroad_timestamp is None:
@@ -112,7 +121,7 @@ class PowerMonitoring:
     offroad_time = (now - offroad_timestamp)
     low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
                             offroad_time > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S)
-    should_shutdown |= offroad_time > MAX_TIME_OFFROAD_S
+    should_shutdown |= offroad_time > self._offroad_limit(now)
     should_shutdown |= low_voltage_shutdown
     should_shutdown |= (self.car_battery_capacity_uWh <= 0)
     should_shutdown &= not ignition

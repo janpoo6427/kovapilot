@@ -85,3 +85,15 @@ All three profiles require the same continuously tracked, radar-matched lead to 
 - `auto_dark`: rescales the upstream range `[BRIGHTNESS_MIN, 100]` to `[10, 100]`, so low light gets darker and daylight stays at 100 %. Without a live road-camera light estimate it keeps the upstream value.
 - `fixed`: uses the fixed value. Values below 30 % are produced by the dim overlay, not the backlight.
 - While an onroad alert is shown (`selfdriveState.alertSize != none`) the result is never dimmer than upstream auto. Offroad brightness, the sleep timeout and display power are unchanged. Onroad screen-off is intentionally not offered.
+
+## Power: automatic power off
+
+`power.auto_power_off_minutes` (`자동 전원 끄기`) is how long the comma stays on after the vehicle is switched off. Options are `0` (always on) and every 30 minutes from `30` to `1440` (24 hours), 49 values in total. The default is `1440`: the earlier fixed limit was 30 hours, and 24 hours is the closest listed value. The setting has `risk: behavior`, `applyPolicy: immediate` and `savePolicy: anytime`.
+
+- The consumer is `system/hardware/power_monitoring.py` in hardwared. It replaces only the fixed offroad time limit (`MAX_TIME_OFFROAD_S`, now 24 hours and used when nothing valid is saved). It reads `KovaParams` at most every 10 seconds with a tolerant reader (`kovapilot/config/power_off_settings.py`): a missing, unreadable or unlisted value uses 24 hours.
+- `0` skips the time limit only. The upstream rules stay: never while the ignition is on, at least 5 minutes (`DELAY_SHUTDOWN_TIME_S`) after switch-off, `DisablePowerDown`, `ForcePowerDown`, the low car battery voltage limit, the empty battery estimate and `MIN_ON_TIME_S` still apply.
+- A shorter value saved after the comma has already been offroad longer takes effect at the next read (after the 5 minute floor).
+
+## 전원: 자동 전원 끄기
+
+`power.auto_power_off_minutes`는 시동을 끈 뒤 콤마가 켜져 있는 시간(분)입니다. 목록은 `0`(항상 켜둠)과 30분부터 24시간까지 30분 간격, 모두 49개입니다. 기본값은 `1440`(24시간)으로, 예전 고정값 30시간에 가장 가까운 값입니다. 시간 제한만 바꾸며, 시동 켜짐이면 안 꺼짐·시동 끈 뒤 최소 5분·DisablePowerDown·ForcePowerDown·차 배터리 저전압·배터리 추정 용량 0·MIN_ON_TIME_S 규칙은 그대로입니다. hardwared가 10초마다 한 번 읽고, 없거나 읽지 못하거나 목록 밖 값이면 24시간을 씁니다.
