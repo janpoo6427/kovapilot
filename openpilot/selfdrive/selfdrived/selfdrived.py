@@ -603,6 +603,7 @@ class SelfdriveD:
       self.auto_engage.disengage_on_accelerator = getattr(self, "disengage_on_accelerator", False)
     if self.auto_engage is not None and self.auto_engage.update(
       CS, self.sm, self.events, initialized=self.initialized, enabled=self.enabled, now_ns=time.monotonic_ns(),
+      lateral_engaged=self.always_lateral is not None and self.always_lateral.engaged,
     ):
       self.events.add(EventName.buttonEnable)
     if not self.CP.passive and self.initialized:

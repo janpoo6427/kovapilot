@@ -4,13 +4,21 @@ The start is requested at the moment the accelerator is pressed (janpoo 11/27 22
 panda (ALT_EXP_PEDAL_RESUME) allows controls on that press, and its heartbeat check ends the authority again
 within about 3 s when openpilot does not engage. Engaging with the pedal still held starts in the normal
 accelerator override, so openpilot takes over the speed after the release.
+
+From ignition on the start waits (gray cruise display) and is made on the first press in Drive, also when
+pulling away from a stop (janpoo 11/27 23:12). Park must have been seen in this session; reversing or Neutral
+before Drive keeps it waiting. Braking before or while stopped in Drive is normal driving and does not lock it;
+the driver turning cruise off on purpose does (the runtime reports it as hard_stop).
 """
 
 from dataclasses import dataclass
 
 
-READY_NS = 1_000_000_000              # the entry conditions are stable this long before the press
-AUTHORITY_WAIT_NS = 500_000_000       # panda controlsAllowed from the press reaches selfdrived a little later
+READY_NS = 1_000_000_000              # the system conditions are stable this long before the press
+# After the press, the start waits this long while the pedal stays pressed for panda controlsAllowed and the
+# moment conditions (brake released, no entry block, the plan no longer stopping once the car rolls). It stays
+# below the panda heartbeat check (about 3 s), which ends the authority of a press that did not engage.
+LAUNCH_WINDOW_NS = 1_500_000_000
 
 
 @dataclass(frozen=True)
@@ -18,7 +26,8 @@ class AutoEngageInputs:
   now_ns: int
   parked: bool = False
   driving: bool = False
-  ready: bool = False                 # entry conditions except panda authority and the accelerator itself
+  ready: bool = False                 # system conditions, stable for READY_NS before the press
+  entry_ok: bool = False              # moment conditions (pedals, buttons, entry events, plan) at the start
   authority: bool = False             # panda controls allowed
   gas_pressed: bool = False
   manual_engage: bool = False
@@ -49,11 +58,11 @@ class AutoEngage:
       self.pending_until = None
       return False
 
+    # Park seen in this session arms the start; Reverse or Neutral before Drive keep it armed
     if inputs.parked:
       self.park_observed = True
       self.driver_departed = False
     elif not inputs.driving:
-      self.park_observed = False
       self.driver_departed = False
     elif self.park_observed and gas_press:
       self.driver_departed = True
@@ -65,13 +74,13 @@ class AutoEngage:
     if self.ready_since is None:
       self.ready_since = inputs.now_ns
     if gas_press and inputs.now_ns - self.ready_since >= READY_NS:
-      self.pending_until = inputs.now_ns + AUTHORITY_WAIT_NS
+      self.pending_until = inputs.now_ns + LAUNCH_WINDOW_NS
     if self.pending_until is None:
       return False
-    if inputs.now_ns > self.pending_until:
+    if inputs.now_ns > self.pending_until or not inputs.gas_pressed:
       self.pending_until = None
       return False
-    if not inputs.authority:
+    if not (inputs.authority and inputs.entry_ok):
       return False
     self.pending_until = None
     self.used = True

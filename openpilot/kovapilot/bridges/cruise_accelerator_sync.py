@@ -1,7 +1,7 @@
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
 from openpilot.kovapilot.longitudinal.cruise_accelerator_sync import CruiseAcceleratorSync
-from openpilot.selfdrive.car.cruise import IMPERIAL_INCREMENT, VCruiseHelper, V_CRUISE_MAX
+from openpilot.selfdrive.car.cruise import IMPERIAL_INCREMENT, VCruiseHelper, V_CRUISE_MAX, V_CRUISE_MIN
 
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -18,8 +18,23 @@ class CruiseAcceleratorSyncBridge:
     self.press_without_buttons = False
     self.gas_prev = False
     self.engaged_prev = False
-    # cruise engaged on the accelerator press that is still held (first start or pedal resume)
+    # cruise engaged while the accelerator press is still held (first start, pedal resume, or SET/RES)
     self.engaged_on_press = False
+
+  def initialize_on_accelerator(self, CS, is_metric: bool) -> None:
+    """Call right after VCruiseHelper.initialize_v_cruise on the step openpilot engages (CS from that step).
+
+    Engaged by an accelerator press without cruise buttons (first start or pedal resume): the set speed starts at
+    the current speed, also from a stop, instead of the initial cruise speed (at least 40 km/h), floored at
+    V_CRUISE_MIN like the cruise buttons, and then follows the held pedal (janpoo 11/27 23:12)."""
+    if self.cruise.CP.pcmCruise or not (CS.gasPressed and self.press_without_buttons and not self.held_buttons):
+      return
+    speed_kph = CS.vEgo * CV.MS_TO_KPH
+    if is_metric:
+      target_kph = float(round(speed_kph))
+    else:
+      target_kph = round(speed_kph * CV.KPH_TO_MPH) * IMPERIAL_INCREMENT
+    self.cruise.v_cruise_kph = self.cruise.v_cruise_cluster_kph = float(min(max(target_kph, V_CRUISE_MIN), V_CRUISE_MAX))
 
   def update(self, CS, CC, *, inputs_valid: bool, cruise_engaged: bool, enabled: bool, stock_shadow: bool,
              disengage_on_accelerator: bool, is_metric: bool) -> float | None:
@@ -40,7 +55,8 @@ class CruiseAcceleratorSyncBridge:
       self.press_without_buttons = False
     if not CS.gasPressed or not cruise_engaged or manual_input:
       self.engaged_on_press = False
-    elif not self.engaged_prev and self.press_without_buttons and not stock:
+    elif not self.engaged_prev and not stock:
+      # also when a SET/RES press engaged with the pedal held: the set speed follows the pedal (janpoo 11/27 23:12)
       self.engaged_on_press = True
     self.gas_prev = CS.gasPressed
     self.engaged_prev = cruise_engaged

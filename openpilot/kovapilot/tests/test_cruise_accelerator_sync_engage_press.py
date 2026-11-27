@@ -78,7 +78,9 @@ def test_set_speed_follow_stops_at_the_upper_limit():
   assert step(speed, False)[0] == 145
 
 
-def test_engaged_with_the_set_button_during_the_press_keeps_the_existing_rule():
+def test_engaged_with_the_set_button_during_the_press_follows_too():
+  # KOVA 11/27 23:12 (janpoo: cruise turned on while accelerating, so accelerating raises it): was the existing
+  # rule, the set speed stayed at the engaged value until the pedal was released and pressed again
   helper, step = setup()
   step(55.0, False, enabled=False)
   step(55.0, True, enabled=False)
@@ -88,7 +90,10 @@ def test_engaged_with_the_set_button_during_the_press_keeps_the_existing_rule():
   speed = 55.0
   for _ in range(MIN_PRESS_SAMPLES + 200):
     speed += 0.05
-    assert step(speed, True)[0] == start
+    assert step(speed, True)[0] >= start
+  assert start == 55
+  assert step(speed, True)[0] == round(speed)
+  assert step(speed, False)[0] == round(speed)
 
 
 def test_sync_setting_off_keeps_the_engaged_speed():

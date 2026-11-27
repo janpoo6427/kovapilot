@@ -207,6 +207,7 @@ class Car:
     if CC.enabled and not self.CC_prev.enabled:
       # Use CarState w/ buttons from the step selfdrived enables on
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed)
+      self.cruise_accelerator_sync.initialize_on_accelerator(self.CS_prev, is_metric)
 
     self._update_cruise_accelerator_sync(CS, CC, can_rcv_valid, is_metric)
 

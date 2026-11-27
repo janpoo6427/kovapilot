@@ -97,13 +97,14 @@ def test_production_state_machine_starts_once_then_observes_axis_pause(monkeypat
   assert auto_engage_settings.read_auto_engage_status()["longitudinal"] == "manualRequired"
 
 
-def test_denied_authority_or_speed_floor_never_requests_enable(monkeypatch, tmp_path):
+def test_denied_authority_never_requests_enable(monkeypatch, tmp_path):
+  # KOVA 11/27 23:12: the 40 km/h floor is gone (test_launch_engage.py); was: 8 m/s never started, then denied authority
   runtime = _runtime(monkeypatch, tmp_path)
+  runtime.sd.sm["pandaStates"][0].controlsAllowed = False
   runtime.depart(speed=8.0)
   for _ in range(15):
     assert not runtime.step()
   runtime.cs.vEgo = 15.0
-  runtime.sd.sm["pandaStates"][0].controlsAllowed = False
   for _ in range(15):
     assert not runtime.step()
 

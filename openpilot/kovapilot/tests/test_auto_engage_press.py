@@ -45,12 +45,13 @@ def test_press_waits_briefly_for_panda_authority(monkeypatch, tmp_path):
 
 
 def test_authority_arriving_after_the_wait_does_not_start(monkeypatch, tmp_path):
+  # KOVA 11/27 23:12: the wait is now 1.5 s while the pedal stays pressed (LAUNCH_WINDOW_NS, was 0.5 s)
   runtime = _runtime(monkeypatch, tmp_path)
   panda = runtime.sd.sm["pandaStates"][0]
   panda.controlsAllowed = False
   _drive(runtime)
   runtime.cs.gasPressed = True
-  for _ in range(6):
+  for _ in range(16):
     assert not runtime.step(GAS)
   panda.controlsAllowed = True
   for _ in range(20):
@@ -84,12 +85,9 @@ def test_entry_conditions_must_be_stable_before_the_press(monkeypatch, tmp_path)
   assert runtime.step(GAS)
 
 
-def test_press_below_the_initial_cruise_speed_does_not_start(monkeypatch, tmp_path):
+def test_press_below_the_initial_cruise_speed_starts(monkeypatch, tmp_path):
+  # KOVA 11/27 23:12: no 40 km/h floor any more (was: 8 m/s never started, also not after speeding up)
   runtime = _runtime(monkeypatch, tmp_path)
   _drive(runtime, speed=8.0)
   runtime.cs.gasPressed = True
-  for _ in range(5):
-    assert not runtime.step(GAS)
-  runtime.cs.vEgo = 15.0
-  for _ in range(20):
-    assert not runtime.step(GAS)
+  assert runtime.step(GAS)

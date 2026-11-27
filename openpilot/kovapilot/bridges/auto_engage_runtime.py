@@ -8,17 +8,21 @@ from openpilot.kovapilot.config.parked_setting import fresh_message, stopped_in_
 from openpilot.kovapilot.engagement.auto_engage import AutoEngage, AutoEngageInputs
 from openpilot.kovapilot.engagement.pedal_resume import PedalResume, PedalResumeInputs
 from openpilot.kovapilot.vehicle.pedal_resume import pedal_resume_enabled
-from openpilot.selfdrive.car.cruise import V_CRUISE_INITIAL, V_CRUISE_MAX
+from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.selfdrived.events import ET, EVENTS
 
 
 IGNORED_MODES = (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput)
 ButtonType = car.CarState.ButtonEvent.Type
-MANUAL_SELECTION_BUTTONS = (ButtonType.cancel, ButtonType.lkas, ButtonType.mainCruise)
+# The driver turning cruise off on purpose locks the automatic start: CANCEL, MAIN, and LFA when it turns
+# always-on lateral off. LFA turning always-on lateral on keeps the start waiting (janpoo 11/27 23:12).
+MANUAL_SELECTION_BUTTONS = (ButtonType.cancel, ButtonType.mainCruise)
 SET_RESUME_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.setCruise, ButtonType.resumeCruise)
 ENTRY_BLOCKING_EVENTS = (ET.NO_ENTRY, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE, ET.USER_DISABLE)
 # the automatic start is made at the accelerator press, so the press itself does not block it
 ACCELERATOR_OVERRIDE = log.OnroadEvent.EventName.gasPressedOverride
+# braking (also regen) before the start is normal driving: it does not lock the start
+PEDAL_PRESSED = log.OnroadEvent.EventName.pedalPressed
 # The saved preference is re-read while driving. Turning it off stops any later
 # automatic start at once; turning it on only arms the next departure from Park.
 PREFERENCE_POLL_NS = 1_000_000_000
@@ -58,7 +62,6 @@ class AutoEngageRuntime:
     self.params = params
     self.requested = False
     self.session = 0
-    self.initial_cruise_speed = V_CRUISE_INITIAL
     self.policy = AutoEngage(seen_session=True)
     self.last_publish = 0
     self.last_status: tuple[str, str] | None = None
@@ -72,7 +75,6 @@ class AutoEngageRuntime:
     self.requested = read_auto_engage(self.params)
     self.next_preference_read = now_ns + PREFERENCE_POLL_NS
     try:
-      self.initial_cruise_speed = max(V_CRUISE_INITIAL, self.params.get("InitialCruiseSpeedKph", return_default=True))
       prior = read_auto_engage_status()
       self.policy = AutoEngage(seen_session=prior is not None and prior["session"] >= session)
       # Reserve this session before the first opportunity to enable. A restarted
@@ -82,7 +84,7 @@ class AutoEngageRuntime:
       self.policy = AutoEngage(seen_session=True)
     self.last_status = None
 
-  def update(self, cs, sm, events, *, initialized: bool, enabled: bool, now_ns: int) -> bool:
+  def update(self, cs, sm, events, *, initialized: bool, enabled: bool, now_ns: int, lateral_engaged: bool = False) -> bool:
     device = sm["deviceState"]
     if (not sm.valid["deviceState"] or not sm.alive["deviceState"] or
         not 0 <= now_ns - sm.logMonoTime["deviceState"] <= 1_500_000_000 or
@@ -103,7 +105,7 @@ class AutoEngageRuntime:
     elif not self.requested:
       status = ("off", "off")
     else:
-      request, status = self._update_supported(cs, sm, events, initialized, enabled, now_ns)
+      request, status = self._update_supported(cs, sm, events, initialized, enabled, now_ns, lateral_engaged)
       request = request or pedal_request
       if self.pedal is not None and not enabled and status == ("manualRequired", "manualRequired") and self.pedal.waiting():
         status = ("waiting", "waiting")
@@ -136,24 +138,36 @@ class AutoEngageRuntime:
       authority=authority, entry_ok=entry_ok,
     ))
 
-  def _update_supported(self, cs, sm, events, initialized: bool, enabled: bool, now_ns: int) -> tuple[bool, tuple[str, str]]:
+  def _update_supported(self, cs, sm, events, initialized: bool, enabled: bool, now_ns: int,
+                        lateral_engaged: bool) -> tuple[bool, tuple[str, str]]:
     driving = cs.gearShifter == car.CarState.GearShifter.drive
-    manual_selection = any(button.type in MANUAL_SELECTION_BUTTONS for button in cs.buttonEvents)
+    # lateral_engaged: always-on lateral before this step, so an LFA press now turns it off
+    manual_selection = any(button.type in MANUAL_SELECTION_BUTTONS or (button.type == ButtonType.lkas and lateral_engaged)
+                           for button in cs.buttonEvents)
     services = ("pandaStates", "driverMonitoringState", "longitudinalPlan", "carControl", "modelV2")
     fresh = all(fresh_message(sm, now_ns, service) for service in services)
     dm = sm["driverMonitoringState"]
     dm_ok = (dm.disableReason == log.DriverMonitoringState.DisableReason.none and not dm.lockout and
              not dm.alwaysOnLockout and dm.alertLevel == log.DriverMonitoringState.AlertLevel.none)
     authority = fresh and has_control_authority(self.cp, sm["pandaStates"])
-    hard_stop = (manual_selection or (driving and (events.contains(ET.USER_DISABLE) or events.contains(ET.IMMEDIATE_DISABLE))) or
+    # a brake press disables an engaged openpilot as before; before the start it does not lock
+    user_disable = events.contains(ET.USER_DISABLE) if enabled else contains_except(events, ET.USER_DISABLE, PEDAL_PRESSED)
+    hard_stop = (manual_selection or (driving and (user_disable or events.contains(ET.IMMEDIATE_DISABLE))) or
                  (enabled and (not authority or not dm_ok)))
-    v_min = max(self.initial_cruise_speed * CV.KPH_TO_MS, self.cp.minEnableSpeed, self.cp.minSteerSpeed, 0.3)
-    speed_ok = isfinite(cs.vEgo) and v_min <= cs.vEgo <= V_CRUISE_MAX * CV.KPH_TO_MS
+    # any speed from a stop on (no 40 km/h floor, also at standstill, janpoo 11/27 23:12); the car minimum stays
+    speed_ok = isfinite(cs.vEgo) and self.cp.minEnableSpeed <= cs.vEgo <= V_CRUISE_MAX * CV.KPH_TO_MS
     controls = sm["carControl"]
+    # system conditions, stable for 1 s before the press
     ready = (
-      initialized and fresh and dm_ok and cs.canValid and cs.cruiseState.available and speed_ok and not cs.standstill
-      and not (cs.brakePressed or cs.regenBraking or cs.brakeHoldActive or cs.parkingBrake or cs.accFaulted)
-      and not (cs.steerFaultTemporary or cs.steerFaultPermanent or cs.steeringPressed or cs.buttonEvents)
+      initialized and fresh and dm_ok and cs.canValid and cs.cruiseState.available
+      and not (cs.accFaulted or cs.steerFaultTemporary or cs.steerFaultPermanent)
+    )
+    # moment conditions at the start itself, shortly after the press: a brake released just before the press
+    # does not block it, and neither does the stopping plan of a car still at standstill once it rolls
+    entry_ok = (
+      speed_ok
+      and not (cs.brakePressed or cs.regenBraking or cs.brakeHoldActive or cs.parkingBrake)
+      and not (cs.steeringPressed or cs.buttonEvents)
       and not (sm["longitudinalPlan"].shouldStop or sm["longitudinalPlan"].fcw)
       and not any(events.contains(event_type) for event_type in (
         ET.NO_ENTRY, ET.PRE_ENABLE, ET.SOFT_DISABLE, ET.OVERRIDE_LATERAL,
@@ -161,7 +175,8 @@ class AutoEngageRuntime:
       and not contains_except(events, ET.OVERRIDE_LONGITUDINAL, ACCELERATOR_OVERRIDE)
     )
     request = self.policy.request(AutoEngageInputs(
-      now_ns=now_ns, parked=stopped_in_park(cs), driving=driving and cs.canValid, ready=ready, authority=authority,
+      now_ns=now_ns, parked=stopped_in_park(cs), driving=driving and cs.canValid, ready=ready, entry_ok=entry_ok,
+      authority=authority,
       gas_pressed=cs.gasPressed, manual_engage=events.contains(ET.ENABLE), hard_stop=hard_stop, enabled=enabled,
     ))
     status = (("manualRequired", "manualRequired") if hard_stop else
