@@ -12,14 +12,52 @@ from openpilot.kovapilot.gateway.navigation_status import (NAVIGATION_FRESH_NS, 
                                                           auto_lane_change_fields, navigation_fields)
 
 
-def _points(line):
-  xs, ys, zs = line.x, line.y, line.z
-  points = []
-  for index in range(min(len(xs), len(ys), len(zs), 33)):
-    x, y, z = xs[index], ys[index], zs[index]
-    if all(math.isfinite(value) for value in (x, y, z)):
-      points.append({"x": x, "y": y, "z": z})
-  return points
+LANE_MIN_PROB = 0.2  # below this the app hides even an already shown ego lane line
+
+
+def _points(line, limit=33):
+  """Display points in the app frame: x forward, y left (the model's y points right), cm."""
+  try:
+    xs, ys = line.x, line.y
+    points = []
+    for index in range(min(len(xs), len(ys), limit)):
+      x, y = xs[index], ys[index]
+      if math.isfinite(x) and math.isfinite(y):
+        points.append({"x": round(x, 2), "y": round(-y, 2)})
+    return points
+  except Exception:
+    return []
+
+
+def _model_fields(model):
+  """Planned path, lane lines (index, probability) and road edges (std); display only, never raises."""
+  fields = {}
+  try:
+    fields["modelFrameId"] = int(model.frameId)
+    fields["plannedPath"] = _points(model.position)
+    probs = list(model.laneLineProbs)
+    lanes = []
+    for index, line in enumerate(list(model.laneLines)[:4]):
+      prob = probs[index] if index < len(probs) else 0.
+      if math.isfinite(prob) and prob >= LANE_MIN_PROB:
+        points = _points(line)
+        if len(points) >= 2:
+          lanes.append({"index": index, "probability": round(min(max(prob, 0.), 1.), 3), "points": points})
+    fields["laneLines"] = lanes
+    stds = list(model.roadEdgeStds)
+    edges, edge_stds = [], []
+    for index, edge in enumerate(list(model.roadEdges)[:2]):
+      points = _points(edge)
+      std = stds[index] if index < len(stds) else float("inf")
+      if len(points) >= 2 and math.isfinite(std):
+        edges.append(points)
+        edge_stds.append(round(std, 3))
+    if len(edges) == 2:
+      fields["roadEdges"] = edges
+      fields["roadEdgeStds"] = edge_stds
+  except Exception:
+    return {key: value for key, value in fields.items() if key == "plannedPath"}
+  return fields
 
 
 def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
@@ -30,7 +68,7 @@ def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
     return None
   gear = str(car.gearShifter)
   scene = {
-    "schemaVersion": 1, "monotonicTimeNanos": now_ns, "speedMps": car.vEgo,
+    "schemaVersion": 2, "monotonicTimeNanos": now_ns, "speedMps": car.vEgo,
     "gear": gear if gear in ("park", "reverse", "neutral", "drive") else "unknown",
     "leftBlinker": car.leftBlinker, "rightBlinker": car.rightBlinker, "brakeActive": car.brakePressed,
   }
@@ -41,11 +79,7 @@ def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
   if fresh_message(sm, now_ns, "selfdriveState"):
     scene["engaged"] = sm["selfdriveState"].enabled
   if fresh_message(sm, now_ns, "modelV2"):
-    model = sm["modelV2"]
-    scene["plannedPath"] = _points(model.position)
-    for key, index in (("leftLane", 1), ("rightLane", 2)):
-      if index < min(len(model.laneLines), len(model.laneLineProbs)) and model.laneLineProbs[index] >= 0.5:
-        scene[key] = _points(model.laneLines[index])
+    scene.update(_model_fields(sm["modelV2"]))
   if _fresh(sm, now_ns, "kovaNavigation", NAVIGATION_FRESH_NS):
     scene.update(navigation_fields(sm["kovaNavigation"], now_ns))
   scene.update(auto_lane_change_fields(sm["modelV2"] if fresh_message(sm, now_ns, "modelV2") else None, car,

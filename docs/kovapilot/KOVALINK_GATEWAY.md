@@ -176,10 +176,14 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | `POST /v1/git/apply` | Queue a reviewed branch or commit for the offroad updater |
 | `POST /v1/device/restart` | Ask manager to reboot the offroad device |
 
-Telemetry frames include `schemaVersion: 1`, `monotonicTimeNanos` and
+Telemetry frames include `schemaVersion: 2`, `monotonicTimeNanos` and
 `speedMps`. The frame can also include gear, turn signals, brake status,
-steering angle, cruise set speed, engagement and model path or lane points.
-Stale source data is omitted. Camera signaling takes `sdp` and `cameras`.
+steering angle, cruise set speed, engagement and model geometry.
+Stale source data is omitted. Model geometry is display only and uses the
+app frame: `x` forward, `y` left, meters rounded to cm (schema 1 sent the
+model's right-positive `y`): `plannedPath`, `laneLines` (`index` 0-3 far left
+to far right, `probability`, `points`; lines under 0.2 are left out),
+`roadEdges` with `roadEdgeStds` (both edges or none) and `modelFrameId`. Camera signaling takes `sdp` and `cameras`.
 The proxy sends the daemon an allowlisted request with empty cereal bridges.
 
 If Git cannot inspect the working tree, status and previews return
