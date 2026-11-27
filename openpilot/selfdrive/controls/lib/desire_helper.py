@@ -21,15 +21,18 @@ class DesireHelper:
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob):
+  def update(self, carstate, lateral_active, lane_change_prob, alc=None):
+    # alc: KOVA AutoLaneChange (kovapilot/lateral/auto_lane_change.py); None or off keeps the stock behaviour
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
-    below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
+    below_lane_change_speed = v_ego < (LANE_CHANGE_SPEED_MIN if alc is None else alc.speed_min(LANE_CHANGE_SPEED_MIN))
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self.lane_change_state = LaneChangeState.off
       self.lane_change_direction = LaneChangeDirection.none
       self.lane_change_timer = 0.0
+      if alc is not None:
+        alc.stopped()
     else:
       if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
         self.lane_change_state = LaneChangeState.preLaneChange
@@ -55,12 +58,26 @@ class DesireHelper:
         elif torque_applied and not blindspot_detected:
           self.lane_change_state = LaneChangeState.laneChangeStarting
           self.lane_change_timer = 0.0
+          if alc is not None:
+            alc.reset()  # the driver's lane change
+        elif alc is not None and not blindspot_detected and alc.start_allowed(self.lane_change_direction):
+          self.lane_change_state = LaneChangeState.laneChangeStarting
+          self.lane_change_timer = 0.0
+          alc.started(self.lane_change_direction)
 
       elif self.lane_change_state == LaneChangeState.laneChangeStarting:
         self.lane_change_timer += DT_MDL
 
-        if lane_change_prob < 0.02 and self.lane_change_timer >= LANE_CHANGE_START_TIME:
+        if alc is not None and alc.abort_reason(self.lane_change_direction):
+          # canceled automatic lane change before crossing: AutoLaneChange steers back to the original lane
+          self.lane_change_state = LaneChangeState.off
+          self.lane_change_direction = LaneChangeDirection.none
           self.lane_change_timer = 0.0
+          alc.begin_return()
+        elif lane_change_prob < 0.02 and self.lane_change_timer >= LANE_CHANGE_START_TIME:
+          self.lane_change_timer = 0.0
+          if alc is not None:
+            alc.finished()
           if one_blinker:
             self.lane_change_state = LaneChangeState.preLaneChange
             self.lane_change_direction = self.get_lane_change_direction(carstate)

@@ -114,4 +114,30 @@ def vehicle_dependency_conditions(params) -> dict[str, str]:
     # navcamd supplies verified camera points (carrot-compatible app, stock navigation CAN) once the car is known.
     "verifiedCameraInput": "unknown" if supported is None else "met",
     "independentLateralControl": _independent_lateral_state(params),
+    "blindSpotMonitor": _car_params_condition(params, _blind_spot_monitor),
+    "blinkerOutput": _car_params_condition(params, _blinker_output),
   }
+
+
+def _blind_spot_monitor(cp) -> bool:
+  from openpilot.kovapilot.lateral.auto_lane_change import auto_lane_change_supported
+  return auto_lane_change_supported(cp)
+
+
+def _blinker_output(cp) -> bool:
+  from openpilot.kovapilot.navigation.nav_blinker import nav_blinker_output_supported
+  return nav_blinker_output_supported(cp)
+
+
+def _car_params_condition(params, supported) -> str:
+  from capnp import KjException
+  from opendbc.car.structs import car
+
+  raw = params.get("CarParams")
+  if raw is not None:
+    try:
+      with car.CarParams.from_bytes(raw) as cp:
+        return "met" if supported(cp) else "unsupported"
+    except (ValueError, KjException):
+      pass
+  return "unknown"

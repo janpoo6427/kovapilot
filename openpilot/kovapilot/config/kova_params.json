@@ -61,6 +61,29 @@
       "requiredCapabilities": ["alwaysSteering"]
     },
     {
+      "key": "steering.auto_lane_change",
+      "dependencies": [
+        {"condition": "blindSpotMonitor", "title": {"ko": "후측방 경고(BSM) 지원", "en": "Blind-spot monitor support"}}
+      ],
+      "groupId": "steering",
+      "order": 110,
+      "type": "enum",
+      "control": "switch",
+      "options": [0, 1],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
+      "defaultValue": 0,
+      "title": {"ko": "자동 차선 변경", "en": "Automatic lane change"},
+      "description": {
+        "ko": "크루즈(openpilot)가 켜져 있고 30 km/h 이상일 때 방향지시등을 켜고 1초 뒤 핸들을 밀지 않아도 차선을 바꿉니다. 그쪽 후측방 경고(BSM)가 1초 동안 없고 모델에 옆 차선이 보여야 하며, 방향지시등 한 번에 한 번만 자동으로 합니다. 브레이크·반대 방향 핸들·운전자 모니터링 경고 때는 하지 않고, 바꾸는 도중 BSM이 켜지거나 브레이크·반대 핸들이면 선을 넘기 전에는 원래 차선으로 돌아갑니다. BSM이 없거나 BSM 신호가 끊긴 차는 지금처럼 핸들을 밀어야 합니다. 차선 변경 중이 아닐 때 바로 적용됩니다.",
+        "en": "With cruise (openpilot) engaged at 30 km/h or more, changes lanes 1 s after you turn on the turn signal without a nudge on the wheel. The blind-spot monitor on that side must have been clear for 1 s and the model must see the lane, and it happens once per turn signal. It does not start while braking, steering the other way or with a driver monitoring warning; braking, steering the other way or a blind-spot warning during the change steers back to the original lane before crossing the line. Vehicles without a blind-spot monitor or with its signal lost still need the nudge. Applies at once outside a lane change."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "immediate",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
       "key": "engagement.auto_engage",
       "groupId": "steering",
       "order": 80,
@@ -109,6 +132,29 @@
       "access": "readWrite",
       "risk": "control",
       "applyPolicy": "offroad",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
+      "key": "navigation.auto_blinker",
+      "dependencies": [
+        {"condition": "blinkerOutput", "title": {"ko": "방향지시등 켜기 지원", "en": "Turn signal output support"}}
+      ],
+      "groupId": "navigation",
+      "order": 110,
+      "type": "enum",
+      "control": "switch",
+      "options": [0, 1],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
+      "defaultValue": 0,
+      "title": {"ko": "내비 자동 방향지시등", "en": "Navigation turn signal"},
+      "description": {
+        "ko": "내비가 갈림길·진출로를 안내할 때 방향지시등을 켜고, 자동 차선 변경 조건을 그대로 거칩니다. 차에서 방향지시등을 켤 수 있는 차량에서만 동작합니다(지금은 없음).",
+        "en": "Turns on the turn signal when navigation announces a fork or exit, then goes through the automatic lane change conditions. Works only on vehicles where the turn signal can be turned on (none yet)."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "immediate",
       "savePolicy": "anytime",
       "availability": "available"
     },

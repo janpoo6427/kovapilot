@@ -262,6 +262,26 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
     Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.4)
 
 
+def auto_lane_change_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  meta = sm['modelV2'].meta
+  if meta.kovaAutoLaneChange == log.KovaAutoLaneChange.returning:
+    return Alert(
+      "Lane Change Canceled",
+      "Returning to Lane",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1)
+  side = "Left" if meta.laneChangeDirection == log.LaneChangeDirection.left else "Right"
+  if meta.kovaAutoLaneChange == log.KovaAutoLaneChange.waiting:
+    text = f"Waiting for {side} Lane to Clear"
+  else:
+    text = f"Changing Lanes {side} Automatically"
+  return Alert(
+    text,
+    "",
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.none, .1)
+
+
 def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   first_word = 'Recalibrating' if sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.recalibrating else 'Calibrating'
   return Alert(
@@ -1035,6 +1055,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Always-on Steering Off",
       AlertStatus.userPrompt, AlertSize.mid,
       Priority.MID, VisualAlert.steerRequired, AudibleAlert.warningSoft, 2.),
+  },
+
+  # KOVA automatic lane change (steering.auto_lane_change)
+  EventName.autoLaneChange: {
+    ET.WARNING: auto_lane_change_alert,
   },
 
   EventName.userBookmarkNotPaired: {

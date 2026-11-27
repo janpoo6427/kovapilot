@@ -60,7 +60,7 @@
             "required": ["title"],
             "oneOf": [{"required": ["condition"]}, {"required": ["setting", "equals"]}],
             "properties": {
-              "condition": {"enum": ["openpilotLongitudinalApplied", "openpilotCruiseSpeedOwner", "stockCruiseSpeedOwner", "acceleratorDisengagementOff", "verifiedCameraInput", "independentLateralControl"]},
+              "condition": {"enum": ["openpilotLongitudinalApplied", "openpilotCruiseSpeedOwner", "stockCruiseSpeedOwner", "acceleratorDisengagementOff", "verifiedCameraInput", "independentLateralControl", "blindSpotMonitor", "blinkerOutput"]},
               "setting": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
               "equals": {"type": "number"},
               "title": {"$ref": "#/$defs/localizedText"}

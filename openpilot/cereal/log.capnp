@@ -133,6 +133,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     alwaysLateralEngaged @106;
     alwaysLateralDisengaged @107;
     alwaysLateralUnavailable @108;
+    autoLaneChange @109;
 
     lowBatteryDEPRECATED @40;
     soundsUnavailableDEPRECATED @47;
@@ -406,6 +407,14 @@ enum LaneChangeDirection {
   none @0;
   left @1;
   right @2;
+}
+
+# KOVA automatic lane change (kovapilot/lateral/auto_lane_change.py), for alerts
+enum KovaAutoLaneChange {
+  none @0;       # off, or the driver has to nudge the wheel
+  pending @1;    # starts by itself after the blinker delay
+  waiting @2;    # waits for the side lane (blind spot cleared just now, lane not seen yet)
+  returning @3;  # canceled before crossing, steering back to the original lane
 }
 
 struct CanData {
@@ -1134,6 +1143,7 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
+    kovaAutoLaneChange @10 :KovaAutoLaneChange;
 
 
     deprecated :group {

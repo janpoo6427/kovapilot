@@ -328,11 +328,16 @@ class SelfdriveD:
     # ******************************************************************************************
 
     # Handle lane change
-    if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
+    auto_lane_change = self.sm['modelV2'].meta.kovaAutoLaneChange
+    if auto_lane_change == log.KovaAutoLaneChange.returning:
+      self.events.add(EventName.autoLaneChange)
+    elif self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection
       if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
          (CS.rightBlindspot and direction == LaneChangeDirection.right):
         self.events.add(EventName.laneChangeBlocked)
+      elif auto_lane_change != log.KovaAutoLaneChange.none:
+        self.events.add(EventName.autoLaneChange)
       else:
         if direction == LaneChangeDirection.left:
           self.events.add(EventName.preLaneChangeLeft)

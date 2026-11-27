@@ -36,6 +36,7 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+from openpilot.kovapilot.lateral.auto_lane_change import AutoLaneChange
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
@@ -346,6 +347,7 @@ def main(demo=False):
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
+  ALC = AutoLaneChange(CP, params)
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -462,9 +464,16 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      ALC.update(sm, modelv2_send.modelV2, DH.lane_change_state, lane_change_prob)
+      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, ALC)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.kovaAutoLaneChange = ALC.publish_state(DH.lane_change_state)
+      return_curvature = ALC.return_curvature(modelv2_send.modelV2, v_ego)
+      if return_curvature is not None:
+        modelv2_send.modelV2.action.desiredCurvature = return_curvature
+        prev_action = log.ModelDataV2.Action(desiredCurvature=return_curvature, desiredAcceleration=action.desiredAcceleration,
+                                             shouldStop=action.shouldStop)
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)

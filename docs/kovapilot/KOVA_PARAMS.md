@@ -53,6 +53,16 @@ The automatic request requires an observed Park state, a fresh accelerator input
 
 During an active engagement, the existing control loop continues to handle temporary steering and accelerator overrides. The automatic request does not grant independent steering or stock cruise authority.
 
+## Automatic lane change
+
+`steering.auto_lane_change` (`자동 차선 변경`) defaults to `0`. Off keeps the stock `DesireHelper` (turn signal, then a nudge on the wheel). On, `openpilot/kovapilot/lateral/auto_lane_change.py` lets a lane change start without the nudge 1 s after the driver turns on one turn signal, only while openpilot is engaged (not always-on steering alone), at 30 km/h or more (`AUTO_LANE_CHANGE_MIN_SPEED`), with driver monitoring off or not warning, and once per turn signal. Braking or steering the other way before the start cancels it for that turn signal. It applies at once outside a lane change. The Gateway condition `blindSpotMonitor` is `met` on Hyundai/Kia/Genesis vehicles with `HAS_BSM`.
+
+The side lane is judged by side-lane sources combined in `side_lane_clear`: the blind-spot monitor (required: `carState.blindspotFresh`, clear on that side for 1 s), the model's side lane (next lane line probability > 0.5 and 2.5 m to it and to the road edge 1 s ahead, for 0.2 s) and `RadarTrackSource`, which has no data yet and changes nothing. Without a blind-spot monitor or with its frame stopped (`blindspotFresh` false for 0.5 s) only the nudge works. During an automatic lane change, a blind-spot warning on the target side, braking, steering the other way, disengaging or a stale blind-spot frame cancels it; before the car crosses the line modeld replaces the model curvature with a pure-pursuit curvature to the original lane centre (at most 2 m/s²) until the car is within 0.3 m of the centre for 1 s and the model's lane change probability is below 0.02. After crossing, the lane change finishes in the new lane. `modelV2.meta.kovaAutoLaneChange` (`pending`, `waiting`, `returning`) drives the `autoLaneChange` alert.
+
+## Navigation turn signal
+
+`navigation.auto_blinker` (`내비 자동 방향지시등`) defaults to `0`. `openpilot/kovapilot/navigation/nav_blinker.py` turns the carrot-compatible app's fork and exit guidance (`nTBTTurnType`, `nTBTDist`, `nRoadLimitSpeed`) into a turn-signal request, which would then go through the automatic lane change conditions. No vehicle can turn on the turn signal from openpilot yet, so the Gateway condition `blinkerOutput` is `unsupported` and nothing sends a turn-signal frame (reasons per vehicle in the module docstring).
+
 ## Lead restart response
 
 `cruise.lead_restart_response` defaults to `0` (Off). Values `1`, `2`, and `3` tune the initial departure delay and acceleration ramp during an active openpilot longitudinal session. Preferences are applied while stopped in Park with driver assistance disengaged. The Gateway reports the planner's applied value separately from the stored preference.
