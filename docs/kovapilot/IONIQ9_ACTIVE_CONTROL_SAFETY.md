@@ -2,6 +2,8 @@
 
 Status: historical vehicle-profile evidence; superseded by `HYUNDAI_CANFD_ADAS_CONTROL_STATUS.md` for the generic control program.
 
+2026-11-27: the exact firmware match below was removed. CAN-FD angle steering and its longitudinal profile are now chosen from the passive message topology alone, the same for every Hyundai CAN-FD car.
+
 ## Scope
 
 This change introduced the capability-driven Hyundai CAN-FD `LFA_ALT` angle-control path for the observed Korean IONIQ 9 configuration. The consolidated branch also contains a separately gated longitudinal staging implementation. It does not port Carrot safety relaxations, HUD/CCNC replacement, TCS/MDPS retransmission, radar writes, ECU disable, communication-control, or tester-present traffic.

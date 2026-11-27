@@ -4,7 +4,7 @@ Status: canonical implementation branch, default off, vehicle actuation NO-GO.
 
 ## Program scope
 
-The target is openpilot engagement plus lateral and longitudinal control on Hyundai CAN-FD platforms that use angle steering and an ADAS-harness connection. IONIQ 9 is the first evidence-backed vehicle profile, not the runtime program name or a generic authorization for other vehicles.
+The target is openpilot engagement plus lateral and longitudinal control on Hyundai CAN-FD platforms that use angle steering and an ADAS-harness connection. IONIQ 9 is the first car with recorded evidence. Since 2026-11-27 the capability is chosen from the messages a car sends, the same for every Hyundai CAN-FD car, not from the platform name or firmware versions.
 
 ## Canonical branch
 
@@ -16,11 +16,11 @@ This branch supersedes the implementation branches `feature/ioniq9-port`, `featu
 
 ## Selection contract
 
-Runtime behavior is selected from typed capability, exact radar/camera/ADAS firmware, and passive bus-role/address/DLC evidence. A vehicle-name branch or the presence of `0xCB` alone never authorizes output. Every additional vehicle must define and validate its own evidence-backed profile.
+Runtime behavior is selected from typed capability and passive bus-role/address/DLC evidence (opendbc `CANFD_ANGLE_STEERING_PROFILE` and `CANFD_ANGLE_LONGITUDINAL_PROFILE`), the same for every Hyundai CAN-FD car. Firmware versions are not matched (removed 2026-11-27). A vehicle-name branch or the presence of `0xCB` alone never authorizes output.
 
-If exact evidence is absent or different, the interface selects `dashcamOnly + SafetyModel.noOutput`. Carrot and Sunny remain wire-behavior and test-structure references, not safety authorities. Carrot safety relaxations are not included.
+If the message evidence is absent or different, the car takes the regular CAN-FD torque steering path (before 2026-11-27 the single angle platform selected `dashcamOnly + SafetyModel.noOutput` instead). Carrot and Sunny remain wire-behavior and test-structure references, not safety authorities. Carrot safety relaxations are not included.
 
-The Hyundai feature branch and the `master-jh` device development branch pin the reviewed opendbc build with lateral staging enabled. The shared `master` pins the disabled build. A non-release build and exact angle capability remain mandatory. With staging off, on release builds, or on an evidence mismatch, the interface selects `dashcamOnly + noOutput`.
+The Hyundai feature branch and the `master-jh` device development branch pin the reviewed opendbc build with lateral staging enabled. The shared `master` pins the disabled build. A non-release build and the angle steering message evidence remain mandatory. With staging off or on release builds, an angle steering car selects `dashcamOnly + noOutput`.
 
 On a supported profile, `card` sets `ControlsReady` after controls initialize through its normal path. The setting reflects initialization and never enables engagement by itself. The staged profile uses stock ACC and carries no LONG safety permission.
 
@@ -36,7 +36,7 @@ The bursty HDA2 blind-spot frame is decoded without making the full powertrain p
 
 Longitudinal remains behind `ENABLE_CANFD_LONGITUDINAL_STAGING = False`. Enabling it requires a source change and new build; no Param or KovaLink setting can enable it.
 
-Even with the source flag changed, activation additionally requires the development opt-in and exact `CANFD_LONGITUDINAL_CANDIDATE` evidence. The initial profile describes an ADAS physical harness with stock SCC on CAM and replacement SCC on ECAN, without ECU disable or diagnostic traffic.
+Even with the source flag changed, activation additionally requires the development opt-in and the `CANFD_LONGITUDINAL_CANDIDATE` message evidence. The initial profile describes an ADAS physical harness with stock SCC on CAM and replacement SCC on ECAN, without ECU disable or diagnostic traffic.
 
 The staged controller output is limited to:
 

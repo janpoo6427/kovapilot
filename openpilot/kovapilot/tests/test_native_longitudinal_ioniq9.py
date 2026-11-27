@@ -2,7 +2,8 @@ from opendbc.car import gen_empty_fingerprint
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.interface import CarInterface
-from opendbc.car.hyundai.values import CAR, HyundaiCanFDStockSafetyStatus
+from opendbc.car.hyundai.values import (CANFD_ANGLE_LONGITUDINAL_PROFILE, CANFD_ANGLE_STEERING_PROFILE, CAR,
+                                       HyundaiCanFDStockSafetyStatus)
 from opendbc.car.structs import CarParams
 
 from openpilot.kovapilot.gateway.native_longitudinal import NativeLongitudinal, vehicle_capability, vehicle_dependency_conditions
@@ -22,8 +23,7 @@ class FakeParams:
 def _ioniq9_car_params(alpha_long: bool, is_release: bool = False) -> bytes:
   fingerprint = gen_empty_fingerprint()
   can = CanBus(None, fingerprint)
-  config = CAR.HYUNDAI_IONIQ_9.config
-  for requirement in (*config.steering_config.required_messages, *config.longitudinal_config.required_messages):
+  for requirement in (*CANFD_ANGLE_STEERING_PROFILE.required_messages, *CANFD_ANGLE_LONGITUDINAL_PROFILE.required_messages):
     fingerprint[getattr(can, requirement.role.value)][requirement.address] = requirement.dlc
   car_fw = [CarParams.CarFw(ecu=ecu, address=address, subAddress=0, fwVersion=versions[0])
             for (ecu, address, _), versions in FW_VERSIONS[CAR.HYUNDAI_IONIQ_9].items()]
@@ -49,8 +49,8 @@ def test_ioniq9_longitudinal_is_offered_but_stays_opt_in():
 
 
 def test_longitudinal_description_states_stock_aeb_fcw_honestly():
-  # IONIQ 9 stock AEB/FCW preservation is still unverified on the car.
-  assert CAR.HYUNDAI_IONIQ_9.config.longitudinal_config.stock_aeb_fcw_status == HyundaiCanFDStockSafetyStatus.UNVERIFIED
+  # CAN-FD angle steering longitudinal: stock AEB/FCW preservation is still unverified on the car.
+  assert CANFD_ANGLE_LONGITUDINAL_PROFILE.stock_aeb_fcw_status == HyundaiCanFDStockSafetyStatus.UNVERIFIED
   item = NativeLongitudinal(FakeParams({}), lambda: (True, False), lambda: True).setting()
   for language in ("ko", "en"):
     description = item["description"][language]
