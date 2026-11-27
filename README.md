@@ -1,6 +1,57 @@
-<div align="center" style="text-align: center;">
+# KovaPilot
 
-<h1>openpilot</h1>
+KovaPilot is an experimental driver-assistance project built on openpilot for
+research and development. It explores how navigation data, cruise behavior, and
+device settings can work together on comma hardware.
+
+## Research use and safety
+
+> [!WARNING]
+> KovaPilot is experimental software for research and development only. Use it
+> with extreme caution in controlled test environments. Follow local laws,
+> remain attentive, and be ready to take over at any time. Use this software at
+> your own risk. To the extent permitted by applicable law, you accept full
+> responsibility for your use and for any resulting accidents, injuries, or
+> property damage.
+
+## Features
+
+- **Navigation-aware speed planning:** evaluates speed-camera alerts from the
+  vehicle or a compatible external navigation source, depending on the build.
+- **Cruise research:** explores curve slowdown and adjustable response when a
+  lead vehicle pulls away. Availability depends on the vehicle's capabilities,
+  the selected build, and its longitudinal-control configuration.
+- **Device settings and telemetry:** publishes selected driving and device state
+  and exposes supported settings through the authenticated KovaLink Gateway.
+
+See the [KovaPilot development guide](docs/kovapilot/DEVELOPMENT.md) and
+[Kova settings documentation](docs/kovapilot/KOVA_PARAMS.md).
+
+## KovaLink companion app
+
+[KovaLink](https://github.com/janpoo6427/kovalink) is the Android and iOS
+companion app for KovaPilot. It displays live telemetry and a road scene, can
+show the road camera on demand, and lets you review or change supported settings
+on a paired device. See the
+[KovaLink Gateway guide](docs/kovapilot/KOVALINK_GATEWAY.md) for connection and
+pairing details.
+
+## Acknowledgments
+
+KovaPilot builds on [openpilot](https://github.com/commaai/openpilot) and draws
+on feature development in [CarrotPilot](https://github.com/ajouatom/openpilot)
+and [sunnypilot](https://github.com/sunnypilot/sunnypilot). We develop KovaPilot
+with sincere gratitude and respect for the developers, testers, and communities
+behind all three projects.
+
+---
+
+## Official openpilot resources
+
+The material below describes official openpilot, including its installers,
+supported vehicles, testing, and services.
+
+<div align="center" style="text-align: center;">
 
 <p>
   <b>openpilot is an operating system for robotics.</b>
@@ -20,7 +71,7 @@
   <a href="https://comma.ai/shop">Try it on a comma four</a>
 </h3>
 
-Quick start: `bash <(curl -fsSL openpilot.comma.ai)`
+Official openpilot quick start: `bash <(curl -fsSL openpilot.comma.ai)`
 
 [![openpilot tests](https://github.com/commaai/openpilot/actions/workflows/tests.yaml/badge.svg)](https://github.com/commaai/openpilot/actions/workflows/tests.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -38,7 +89,7 @@ Quick start: `bash <(curl -fsSL openpilot.comma.ai)`
 </table>
 
 
-Using openpilot in a car
+Using official openpilot in a car
 ------
 
 To use openpilot in a car, you need four things:
@@ -50,7 +101,7 @@ To use openpilot in a car, you need four things:
 We have detailed instructions for [how to install the harness and device in a car](https://comma.ai/setup). Note that it's possible to run openpilot on [other hardware](https://blog.comma.ai/self-driving-car-for-free/), although it's not plug-and-play.
 
 
-### Branches
+### Official openpilot branches
 
 Running `master` and other branches directly is supported, but it's recommended to run one of the following prebuilt branches:
 
@@ -81,7 +132,7 @@ openpilot is developed by [comma](https://comma.ai/) and by users like you. We w
 
 Want to get paid to work on openpilot? [comma is hiring](https://comma.ai/jobs#open-positions) and offers lots of [bounties](https://comma.ai/bounties) for external contributors.
 
-Safety and Testing
+Official openpilot safety and testing
 ----
 
 * openpilot observes [ISO26262](https://en.wikipedia.org/wiki/ISO_26262) guidelines, see [SAFETY.md](docs/SAFETY.md) for more details.
