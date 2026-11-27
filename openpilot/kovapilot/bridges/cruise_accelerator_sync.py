@@ -14,6 +14,12 @@ class CruiseAcceleratorSyncBridge:
     self.cruise = cruise
     self.policy = CruiseAcceleratorSync()
     self.held_buttons: set[int] = set()
+    # the current accelerator press has not been joined by a cruise button
+    self.press_without_buttons = False
+    self.gas_prev = False
+    self.engaged_prev = False
+    # cruise engaged on the accelerator press that is still held (first start or pedal resume)
+    self.engaged_on_press = False
 
   def update(self, CS, CC, *, inputs_valid: bool, cruise_engaged: bool, enabled: bool, stock_shadow: bool,
              disengage_on_accelerator: bool, is_metric: bool) -> float | None:
@@ -27,6 +33,19 @@ class CruiseAcceleratorSyncBridge:
           self.held_buttons.add(button_type)
         else:
           self.held_buttons.discard(button_type)
+
+    if CS.gasPressed and not self.gas_prev:
+      self.press_without_buttons = not manual_input
+    elif not CS.gasPressed or manual_input:
+      self.press_without_buttons = False
+    if not CS.gasPressed or not cruise_engaged or manual_input:
+      self.engaged_on_press = False
+    elif not self.engaged_prev and self.press_without_buttons and not stock:
+      self.engaged_on_press = True
+    self.gas_prev = CS.gasPressed
+    self.engaged_prev = cruise_engaged
+    if self.engaged_on_press:
+      self.policy.allow_held_press()
 
     if stock:
       mode_allowed = stock_shadow and CS.cruiseState.enabled and not CC.cruiseControl.cancel

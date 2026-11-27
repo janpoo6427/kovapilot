@@ -9,7 +9,7 @@ from openpilot.kovapilot.engagement.auto_engage import AutoEngage, AutoEngageInp
 from openpilot.kovapilot.engagement.pedal_resume import PedalResume, PedalResumeInputs
 from openpilot.kovapilot.vehicle.pedal_resume import pedal_resume_enabled
 from openpilot.selfdrive.car.cruise import V_CRUISE_INITIAL, V_CRUISE_MAX
-from openpilot.selfdrive.selfdrived.events import ET
+from openpilot.selfdrive.selfdrived.events import ET, EVENTS
 
 
 IGNORED_MODES = (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput)
@@ -17,9 +17,15 @@ ButtonType = car.CarState.ButtonEvent.Type
 MANUAL_SELECTION_BUTTONS = (ButtonType.cancel, ButtonType.lkas, ButtonType.mainCruise)
 SET_RESUME_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.setCruise, ButtonType.resumeCruise)
 ENTRY_BLOCKING_EVENTS = (ET.NO_ENTRY, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE, ET.USER_DISABLE)
+# the automatic start is made at the accelerator press, so the press itself does not block it
+ACCELERATOR_OVERRIDE = log.OnroadEvent.EventName.gasPressedOverride
 # The saved preference is re-read while driving. Turning it off stops any later
 # automatic start at once; turning it on only arms the next departure from Park.
 PREFERENCE_POLL_NS = 1_000_000_000
+
+
+def contains_except(events, event_type: str, ignored) -> bool:
+  return any(event_type in EVENTS.get(name, {}) for name in events.names if name != ignored)
 
 
 def has_control_authority(cp, pandas) -> bool:
@@ -145,16 +151,17 @@ class AutoEngageRuntime:
     speed_ok = isfinite(cs.vEgo) and v_min <= cs.vEgo <= V_CRUISE_MAX * CV.KPH_TO_MS
     controls = sm["carControl"]
     ready = (
-      initialized and authority and dm_ok and cs.canValid and cs.cruiseState.available and speed_ok and not cs.standstill
+      initialized and fresh and dm_ok and cs.canValid and cs.cruiseState.available and speed_ok and not cs.standstill
       and not (cs.brakePressed or cs.regenBraking or cs.brakeHoldActive or cs.parkingBrake or cs.accFaulted)
       and not (cs.steerFaultTemporary or cs.steerFaultPermanent or cs.steeringPressed or cs.buttonEvents)
       and not (sm["longitudinalPlan"].shouldStop or sm["longitudinalPlan"].fcw)
       and not any(events.contains(event_type) for event_type in (
-        ET.NO_ENTRY, ET.PRE_ENABLE, ET.SOFT_DISABLE, ET.OVERRIDE_LATERAL, ET.OVERRIDE_LONGITUDINAL,
+        ET.NO_ENTRY, ET.PRE_ENABLE, ET.SOFT_DISABLE, ET.OVERRIDE_LATERAL,
       ))
+      and not contains_except(events, ET.OVERRIDE_LONGITUDINAL, ACCELERATOR_OVERRIDE)
     )
     request = self.policy.request(AutoEngageInputs(
-      now_ns=now_ns, parked=stopped_in_park(cs), driving=driving and cs.canValid, ready=ready,
+      now_ns=now_ns, parked=stopped_in_park(cs), driving=driving and cs.canValid, ready=ready, authority=authority,
       gas_pressed=cs.gasPressed, manual_engage=events.contains(ET.ENABLE), hard_stop=hard_stop, enabled=enabled,
     ))
     status = (("manualRequired", "manualRequired") if hard_stop else

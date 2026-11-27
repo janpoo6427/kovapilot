@@ -1,9 +1,16 @@
-"""One automatic start per driving session, using existing control authority."""
+"""One automatic start per driving session, at the driver accelerator press.
+
+The start is requested at the moment the accelerator is pressed (janpoo 11/27 22:28), not at its release:
+panda (ALT_EXP_PEDAL_RESUME) allows controls on that press, and its heartbeat check ends the authority again
+within about 3 s when openpilot does not engage. Engaging with the pedal still held starts in the normal
+accelerator override, so openpilot takes over the speed after the release.
+"""
 
 from dataclasses import dataclass
 
 
-READY_NS = 1_000_000_000
+READY_NS = 1_000_000_000              # the entry conditions are stable this long before the press
+AUTHORITY_WAIT_NS = 500_000_000       # panda controlsAllowed from the press reaches selfdrived a little later
 
 
 @dataclass(frozen=True)
@@ -11,7 +18,8 @@ class AutoEngageInputs:
   now_ns: int
   parked: bool = False
   driving: bool = False
-  ready: bool = False
+  ready: bool = False                 # entry conditions except panda authority and the accelerator itself
+  authority: bool = False             # panda controls allowed
   gas_pressed: bool = False
   manual_engage: bool = False
   hard_stop: bool = False
@@ -24,6 +32,7 @@ class AutoEngage:
     self.park_observed = False
     self.driver_departed = False
     self.ready_since: int | None = None
+    self.pending_until: int | None = None
     self.used = False
     self.was_enabled = False
     self.gas_pressed_prev = True
@@ -34,7 +43,10 @@ class AutoEngage:
     self.was_enabled = inputs.enabled
     if inputs.enabled or inputs.manual_engage:
       self.used = True
+    gas_press = inputs.gas_pressed and not self.gas_pressed_prev
+    self.gas_pressed_prev = inputs.gas_pressed
     if self.locked or self.used:
+      self.pending_until = None
       return False
 
     if inputs.parked:
@@ -43,17 +55,25 @@ class AutoEngage:
     elif not inputs.driving:
       self.park_observed = False
       self.driver_departed = False
-    elif self.park_observed and inputs.gas_pressed and not self.gas_pressed_prev:
+    elif self.park_observed and gas_press:
       self.driver_departed = True
-    self.gas_pressed_prev = inputs.gas_pressed
 
-    if not inputs.driving or not self.driver_departed or inputs.gas_pressed or not inputs.ready:
+    if not inputs.driving or not self.park_observed or not inputs.ready:
       self.ready_since = None
+      self.pending_until = None
       return False
     if self.ready_since is None:
       self.ready_since = inputs.now_ns
-    if inputs.now_ns - self.ready_since < READY_NS:
+    if gas_press and inputs.now_ns - self.ready_since >= READY_NS:
+      self.pending_until = inputs.now_ns + AUTHORITY_WAIT_NS
+    if self.pending_until is None:
       return False
+    if inputs.now_ns > self.pending_until:
+      self.pending_until = None
+      return False
+    if not inputs.authority:
+      return False
+    self.pending_until = None
     self.used = True
     return True
 

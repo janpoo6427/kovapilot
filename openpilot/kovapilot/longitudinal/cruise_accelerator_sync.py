@@ -10,7 +10,10 @@ class CruiseAcceleratorSync:
 
   The set speed follows while the pedal is held (once the press is longer than MIN_PRESS_SAMPLES), so the
   driver sees it climb, and the release applies the same rule one last time. It only ever goes up: easing off
-  while still pressing, or after releasing, keeps the highest step reached."""
+  while still pressing, or after releasing, keeps the highest step reached.
+
+  A press normally counts only when it starts after a released pedal with control active. When cruise engages
+  on the accelerator press itself, allow_held_press() lets that press count from the engagement on."""
 
   def __init__(self):
     self._saw_released_pedal = False
@@ -18,6 +21,11 @@ class CruiseAcceleratorSync:
     self._initial_speed_kph = 0.0
     self._initial_setpoint = None
     self._reported_step = None
+
+  def allow_held_press(self) -> None:
+    """Cruise engaged on this accelerator press: follow it like a press started after a release."""
+    if not self._press_samples:
+      self._saw_released_pedal = True
 
   def follow_setpoint(self, set_speed_kph: float, step_kph: float) -> None:
     """The caller applied a target while the pedal is held: that new set speed is ours, not a driver change."""
