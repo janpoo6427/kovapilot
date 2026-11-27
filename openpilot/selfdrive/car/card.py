@@ -71,7 +71,9 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents'])
+    # selfdrived sends onroadEvents every second and on every change, so gas press/release changes make its
+    # average rate look too high; skip only that average-rate check (alive and valid still gate cruise sync)
+    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents'], ignore_avg_freq=['onroadEvents'])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'radarTracks'])
 
     self.can_rcv_cum_timeout_counter = 0
