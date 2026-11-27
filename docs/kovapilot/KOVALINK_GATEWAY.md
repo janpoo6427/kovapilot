@@ -204,6 +204,19 @@ prepared update is eligible for installation at the next device restart.
 The status and branch
 APIs avoid changing Git refs while a Link update is queued or staged.
 
+Telemetry frames also carry, display only:
+
+- `navigation`: `source` (`carrotV2` = carrot modified TMAP over WebSocket v2 on TCP 7714,
+  `carrotLegacy` = UDP 7706, cameras only, or `none`), `appVersion`, `lastReceivedAgeMs`, and for
+  v2 `guidanceActive` and `offRoute` (from navcamd `kovaNavigation`, sent while it is under 1 s old).
+- `tbt` (v2 with a current guide point): `maneuver` (KovaLink sign from the TMAP turn code, `unknown`
+  for rotaries and toll gates), `turnType`, `distanceMeters`, `mainText`, `roadName`, `nearDirection`,
+  `nextManeuver`/`nextTurnType`/`nextDistanceMeters` (from the car)/`nextRoadName`,
+  `remainingDistanceMeters`, `remainingSeconds`; `speedLimitKph` is the app road speed limit.
+- `autoLaneChange`: `setting` (`on`/`off`/`unknown`), `laneChange` (modelV2 lane change state),
+  `direction`, `auto` (`modelV2.meta.kovaAutoLaneChange` when the build has it, else `unknown`),
+  `blindSpotLeft`/`blindSpotRight` and `blindSpotFresh` (`null` when the build has no such field).
+
 `GET /v1/git/status` also returns `restartEnabled`. `POST /v1/device/restart`
 sets `DoReboot`, the same request as the device's Reboot button, and returns
 HTTP 202 `{"restarting": true}`. It needs the same authorization as apply,

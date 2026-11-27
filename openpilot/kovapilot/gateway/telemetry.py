@@ -8,6 +8,8 @@ from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
 from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
 from openpilot.kovapilot.config.lead_restart_settings import applied_lead_restart
 from openpilot.kovapilot.config.parked_setting import fresh_message, parked_for_settings as parked_for_settings
+from openpilot.kovapilot.gateway.navigation_status import (NAVIGATION_FRESH_NS, AutoLaneChangeSetting,
+                                                          auto_lane_change_fields, navigation_fields)
 
 
 def _points(line):
@@ -20,7 +22,7 @@ def _points(line):
   return points
 
 
-def road_scene(sm, now_ns):
+def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
   if not fresh_message(sm, now_ns, "carState"):
     return None
   car = sm["carState"]
@@ -44,18 +46,30 @@ def road_scene(sm, now_ns):
     for key, index in (("leftLane", 1), ("rightLane", 2)):
       if index < min(len(model.laneLines), len(model.laneLineProbs)) and model.laneLineProbs[index] >= 0.5:
         scene[key] = _points(model.laneLines[index])
+  if _fresh(sm, now_ns, "kovaNavigation", NAVIGATION_FRESH_NS):
+    scene.update(navigation_fields(sm["kovaNavigation"], now_ns))
+  scene.update(auto_lane_change_fields(sm["modelV2"] if fresh_message(sm, now_ns, "modelV2") else None, car,
+                                       auto_lane_change_setting))
   return scene
+
+
+def _fresh(sm, now_ns, service, window_ns) -> bool:
+  try:
+    return bool(sm.valid[service] and sm.alive[service] and 0 <= now_ns - sm.logMonoTime[service] <= window_ns)
+  except KeyError:
+    return False
 
 
 class CerealTelemetry:
   def __init__(self):
     from openpilot.cereal.messaging import SubMaster
 
-    self.sm = SubMaster(["carState", "carControl", "selfdriveState", "modelV2", "managerState"])
+    self.sm = SubMaster(["carState", "carControl", "selfdriveState", "modelV2", "managerState", "kovaNavigation"])
+    self.auto_lane_change_setting = AutoLaneChangeSetting()
 
   def __call__(self):
     self.sm.update(0)
-    return road_scene(self.sm, time.monotonic_ns())
+    return road_scene(self.sm, time.monotonic_ns(), self.auto_lane_change_setting())
 
   def is_parked(self) -> bool:
     self.sm.update(0)
