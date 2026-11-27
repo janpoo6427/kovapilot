@@ -2,7 +2,7 @@
 
 card sets the flag in CarParams.alternativeExperience before pandad configures panda safety when
 engagement.auto_engage is on, so a changed setting reaches panda from the next start. With the flag,
-panda allows controls when the driver releases the brake or the accelerator while cruise is available.
+panda allows controls when the driver releases the brake or presses the accelerator while cruise is available.
 """
 from opendbc.car.hyundai.values import HyundaiFlags
 from opendbc.safety import ALTERNATIVE_EXPERIENCE

@@ -1,15 +1,21 @@
 """Pedal resume (engagement.auto_engage on Hyundai CAN FD with openpilot longitudinal).
 
 The comma-side start conditions follow carrot's automatic cruise start (selfdrive/car/cruise.py
-_update_cruise_state) for the moments the driver releases a pedal; panda safety
-(ALT_EXP_PEDAL_RESUME) allows controls only on those same pedal releases, seen on the car bus.
-Starts that carrot makes without a driver pedal release (soft hold, forward collision distance,
+_update_cruise_state) for the driver's pedal moments: the brake release, and the accelerator press
+(janpoo 11/27 21:35; carrot starts on the accelerator release). Panda safety (ALT_EXP_PEDAL_RESUME)
+allows controls only on those same moments, seen on the car bus.
+
+The accelerator press uses carrot's accelerator-release conditions (a lead too close for the speed
+starts only when stopped, below AutoGasCancelSpeed or with a blinker it does not start). carrot's tap
+start (press shorter than 0.4 s, any speed) cannot be told apart at the press, so a tap is a press
+here. A press never starts when the accelerator disengages (DisengageOnAccelerator).
+Starts that carrot makes without a driver pedal moment (soft hold, forward collision distance,
 desired speed, traffic light) are not made here.
 """
 
 from dataclasses import dataclass
 
-GAS_TOK_NS = 400_000_000              # carrot _gas_tok_timer: accelerator tap shorter than 0.4 s
+GAS_TOK_NS = 400_000_000              # carrot _gas_tok_timer: accelerator held longer than 0.4 s
 AUTO_GAS_TOK_SPEED_KPH = 0            # carrot AutoGasTokSpeed default
 AUTO_GAS_CANCEL_SPEED_KPH = 30        # carrot AutoGasCancelSpeed default
 DRIVE_WAIT_NS = 20_000_000_000        # carrot autoCruiseControl_cancel_timer: 20 s after entering Drive
@@ -64,8 +70,7 @@ class PedalResume:
       self.drive_since = i.now_ns
 
     brake_released = self.brake_prev and not i.brake_pressed
-    gas_released = self.gas_prev and not i.gas_pressed
-    gas_tok = gas_released and self.gas_since is not None and i.now_ns - self.gas_since < GAS_TOK_NS
+    gas_pressed = i.gas_pressed and not self.gas_prev
     if i.gas_pressed:
       if not self.gas_prev:
         self.gas_since = i.now_ns
@@ -77,7 +82,7 @@ class PedalResume:
       self.pending_until = None
       return False
 
-    if (brake_released or gas_released) and self._starts(i, brake_released, gas_released, gas_tok):
+    if (brake_released or gas_pressed) and self._starts(i, brake_released, gas_pressed):
       self.pending_until = i.now_ns + AUTHORITY_WAIT_NS
     if self.pending_until is None:
       return False
@@ -95,16 +100,16 @@ class PedalResume:
             self.drive_since is None or i.now_ns - self.drive_since < DRIVE_WAIT_NS)
 
   @staticmethod
-  def _starts(i: PedalResumeInputs, brake_released: bool, gas_released: bool, gas_tok: bool) -> bool:
+  def _starts(i: PedalResumeInputs, brake_released: bool, gas_pressed: bool) -> bool:
     v_kph = int(i.v_ego_cluster * 3.6 + 0.5)
-    if gas_released:
-      if gas_tok and not i.disengage_on_accelerator and v_kph >= AUTO_GAS_TOK_SPEED_KPH:
-        return True
+    if gas_pressed:
+      if i.disengage_on_accelerator:
+        return False
       if 0 < i.lead_distance < i.v_ego * 0.8:
         return i.v_ego < 1.0
       if v_kph < AUTO_GAS_CANCEL_SPEED_KPH or i.blinker:
         return False
-      return not i.disengage_on_accelerator and v_kph >= AUTO_GAS_TOK_SPEED_KPH
+      return v_kph >= AUTO_GAS_TOK_SPEED_KPH
     if brake_released and not i.blinker:
       if v_kph > AUTO_GAS_TOK_SPEED_KPH:
         return True

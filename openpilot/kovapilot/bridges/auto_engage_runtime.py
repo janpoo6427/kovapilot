@@ -57,7 +57,7 @@ class AutoEngageRuntime:
     self.last_publish = 0
     self.last_status: tuple[str, str] | None = None
     self.next_preference_read = 0
-    # pedal resume: re-engage on the driver's brake/accelerator release (panda ALT_EXP_PEDAL_RESUME)
+    # pedal resume: re-engage on the driver's brake release or accelerator press (panda ALT_EXP_PEDAL_RESUME)
     self.pedal = PedalResume() if self.supported and pedal_resume_enabled(cp) else None
     self.disengage_on_accelerator = False
 

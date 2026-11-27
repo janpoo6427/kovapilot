@@ -599,7 +599,7 @@ class SelfdriveD:
     CS = self.data_sample()
     self.update_events(CS)
     if self.auto_engage is not None:
-      # set by params_thread; pedal resume does not start on an accelerator release when it disengages
+      # set by params_thread; pedal resume does not start on an accelerator press when it disengages
       self.auto_engage.disengage_on_accelerator = getattr(self, "disengage_on_accelerator", False)
     if self.auto_engage is not None and self.auto_engage.update(
       CS, self.sm, self.events, initialized=self.initialized, enabled=self.enabled, now_ns=time.monotonic_ns(),
