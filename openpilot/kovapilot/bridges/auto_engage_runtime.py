@@ -144,33 +144,34 @@ class AutoEngageRuntime:
     # lateral_engaged: always-on lateral before this step, so an LFA press now turns it off
     manual_selection = any(button.type in MANUAL_SELECTION_BUTTONS or (button.type == ButtonType.lkas and lateral_engaged)
                            for button in cs.buttonEvents)
-    services = ("pandaStates", "driverMonitoringState", "longitudinalPlan", "carControl", "modelV2")
+    # driver monitoring is not looked at (janpoo 11/28 00:23): neither its state nor its messages; what selfdrived
+    # itself raises from it (tooDistracted NO_ENTRY when monitoring is on) still blocks like a manual start
+    services = ("pandaStates", "longitudinalPlan", "carControl", "modelV2")
     fresh = all(fresh_message(sm, now_ns, service) for service in services)
-    dm = sm["driverMonitoringState"]
-    dm_ok = (dm.disableReason == log.DriverMonitoringState.DisableReason.none and not dm.lockout and
-             not dm.alwaysOnLockout and dm.alertLevel == log.DriverMonitoringState.AlertLevel.none)
     authority = fresh and has_control_authority(self.cp, sm["pandaStates"])
     # a brake press disables an engaged openpilot as before; before the start it does not lock
     user_disable = events.contains(ET.USER_DISABLE) if enabled else contains_except(events, ET.USER_DISABLE, PEDAL_PRESSED)
     hard_stop = (manual_selection or (driving and (user_disable or events.contains(ET.IMMEDIATE_DISABLE))) or
-                 (enabled and (not authority or not dm_ok)))
+                 (enabled and not authority))
     # any speed from a stop on (no 40 km/h floor, also at standstill, janpoo 11/27 23:12); the car minimum stays
     speed_ok = isfinite(cs.vEgo) and self.cp.minEnableSpeed <= cs.vEgo <= V_CRUISE_MAX * CV.KPH_TO_MS
     controls = sm["carControl"]
-    # system conditions, stable for 1 s before the press
+    # system conditions, stable for 1 s before the press (in any gear after Park)
     ready = (
-      initialized and fresh and dm_ok and cs.canValid and cs.cruiseState.available
+      initialized and fresh and cs.canValid and cs.cruiseState.available
       and not (cs.accFaulted or cs.steerFaultTemporary or cs.steerFaultPermanent)
     )
     # moment conditions at the start itself, shortly after the press: a brake released just before the press
-    # does not block it, and neither does the stopping plan of a car still at standstill once it rolls
+    # does not block it, and neither does the stopping plan of a car still at standstill once it rolls.
+    # The driver steering (also a large angle) does not block it either (janpoo 11/28 00:23): the start goes into
+    # the override state like the accelerator, and the set speed starts at the current speed.
     entry_ok = (
       speed_ok
       and not (cs.brakePressed or cs.regenBraking or cs.brakeHoldActive or cs.parkingBrake)
-      and not (cs.steeringPressed or cs.buttonEvents)
+      and not cs.buttonEvents
       and not (sm["longitudinalPlan"].shouldStop or sm["longitudinalPlan"].fcw)
       and not any(events.contains(event_type) for event_type in (
-        ET.NO_ENTRY, ET.PRE_ENABLE, ET.SOFT_DISABLE, ET.OVERRIDE_LATERAL,
+        ET.NO_ENTRY, ET.PRE_ENABLE, ET.SOFT_DISABLE,
       ))
       and not contains_except(events, ET.OVERRIDE_LONGITUDINAL, ACCELERATOR_OVERRIDE)
     )

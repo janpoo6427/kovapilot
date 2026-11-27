@@ -9,6 +9,9 @@ From ignition on the start waits (gray cruise display) and is made on the first 
 pulling away from a stop (janpoo 11/27 23:12). Park must have been seen in this session; reversing or Neutral
 before Drive keeps it waiting. Braking before or while stopped in Drive is normal driving and does not lock it;
 the driver turning cruise off on purpose does (the runtime reports it as hard_stop).
+
+Driver monitoring is not an input (janpoo 11/28 00:23), and steering does not block the start. The system
+conditions must hold for 1 s before the press in any gear, so a press right after shifting into Drive starts.
 """
 
 from dataclasses import dataclass
@@ -26,7 +29,7 @@ class AutoEngageInputs:
   now_ns: int
   parked: bool = False
   driving: bool = False
-  ready: bool = False                 # system conditions, stable for READY_NS before the press
+  ready: bool = False                 # system conditions, stable for READY_NS before the press (any gear)
   entry_ok: bool = False              # moment conditions (pedals, buttons, entry events, plan) at the start
   authority: bool = False             # panda controls allowed
   gas_pressed: bool = False
@@ -67,12 +70,16 @@ class AutoEngage:
     elif self.park_observed and gas_press:
       self.driver_departed = True
 
-    if not inputs.driving or not self.park_observed or not inputs.ready:
+    # the system conditions count in any gear: shifting P, R, N, D does not restart the 1 s
+    if not inputs.ready:
       self.ready_since = None
       self.pending_until = None
       return False
     if self.ready_since is None:
       self.ready_since = inputs.now_ns
+    if not inputs.driving or not self.park_observed:
+      self.pending_until = None
+      return False
     if gas_press and inputs.now_ns - self.ready_since >= READY_NS:
       self.pending_until = inputs.now_ns + LAUNCH_WINDOW_NS
     if self.pending_until is None:
