@@ -4,7 +4,6 @@ import subprocess
 from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.common.params import Params
-from openpilot.kovapilot.config.git_update_request import KEY as GIT_UPDATE_KEY
 from openpilot.kovapilot.config.kova_params import KovaParamsStore
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway.device_restart import REBOOT_KEY, DeviceRestart, RestartBlocked, restart_allowed
@@ -30,17 +29,12 @@ class FakeParams:
     return self.values.get(key)
 
 
-def test_restart_is_allowed_only_offroad_and_not_while_an_update_is_written():
-  idle = {"IsOffroad": True, "UpdaterState": "idle"}
-  assert restart_allowed(FakeParams(**idle))
-  assert not restart_allowed(FakeParams(**idle), pc=True)
-  assert not restart_allowed(FakeParams(**{**idle, "IsOffroad": False}))
-  assert not restart_allowed(FakeParams(**{**idle, "UpdaterState": "finalizing update..."}))
-  # The device's own Reboot button also works while an update downloads.
-  assert restart_allowed(FakeParams(**{**idle, "UpdaterState": "downloading..."}))
-  assert restart_allowed(FakeParams(IsOffroad=True))
-  for phase, allowed in (("queued", False), ("staged", True), ("installed", True), ("failed", True)):
-    assert restart_allowed(FakeParams(**idle, **{GIT_UPDATE_KEY: {"phase": phase}})) is allowed
+def test_restart_is_allowed_any_time_on_the_device():
+  # janpoo6427 2026-11-27: the restart works with the vehicle on, while driving
+  # and while an update is written; the launch script installs only an update
+  # that was finalized completely.
+  assert restart_allowed()
+  assert not restart_allowed(pc=True)
 
 
 def test_restart_needs_authorization_and_a_request_path():

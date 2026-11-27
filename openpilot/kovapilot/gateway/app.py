@@ -447,7 +447,7 @@ async def git_api(request):
 async def git_apply(request):
   repo = request.app.get(GIT_KEY)
   if repo is None or not repo.can_apply(_git_authorized(request)):
-    return _error(403, "git_mutation_disabled", "offroad maintenance requires authorized access and an idle updater")
+    return _error(403, "git_mutation_disabled", "maintenance requires authorized access, Park or offroad, and an idle updater")
   lock = request.app[GIT_LOCK_KEY]
   if lock.locked():
     return _error(503, "git_busy", "repository inspection is in progress")
@@ -476,7 +476,7 @@ async def device_restart(request):
   try:
     await asyncio.to_thread(restart.restart, _git_authorized(request))
   except RestartBlocked:
-    return _error(403, "restart_blocked", "restart requires authorized access while offroad and not finalizing an update")
+    return _error(403, "restart_blocked", "restart requires authorized access")
   except OSError:
     return _error(503, "restart_unavailable", "device restart could not be requested")
   return web.json_response({"restarting": True}, status=202)

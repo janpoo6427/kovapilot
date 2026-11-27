@@ -13,3 +13,18 @@ def parked_for_settings(sm, now_ns: int) -> bool:
   if not (fresh_message(sm, now_ns, "carState") and fresh_message(sm, now_ns, "selfdriveState")):
     return False
   return stopped_in_park(sm["carState"]) and not sm["selfdriveState"].enabled
+
+
+PARKED_AND_DISENGAGED_SERVICES = ("carState", "carControl", "selfdriveState")
+
+
+def parked_and_disengaged(sm, now_ns: int) -> bool:
+  """Stopped in Park with steering and longitudinal control released.
+
+  The gate for changes from KovaLink while the vehicle is on: settings with a
+  Park policy, the openpilot longitudinal switch, Git maintenance and the VPN.
+  """
+  if not parked_for_settings(sm, now_ns) or not fresh_message(sm, now_ns, "carControl"):
+    return False
+  control = sm["carControl"]
+  return not (control.enabled or control.latActive or control.longActive or sm["selfdriveState"].active)

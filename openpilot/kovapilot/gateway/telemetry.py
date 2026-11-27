@@ -7,7 +7,7 @@ from openpilot.kovapilot.config.auto_engage_settings import applied_auto_engage
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
 from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
 from openpilot.kovapilot.config.lead_restart_settings import applied_lead_restart
-from openpilot.kovapilot.config.parked_setting import fresh_message, parked_for_settings as parked_for_settings
+from openpilot.kovapilot.config.parked_setting import fresh_message, parked_and_disengaged, parked_for_settings as parked_for_settings
 from openpilot.kovapilot.gateway.navigation_status import (NAVIGATION_FRESH_NS, AutoLaneChangeSetting,
                                                           auto_lane_change_fields, navigation_fields)
 
@@ -111,11 +111,7 @@ class CerealTelemetry:
 
   def is_parked_and_disengaged(self) -> bool:
     self.sm.update(0)
-    now = time.monotonic_ns()
-    if not parked_for_settings(self.sm, now) or not fresh_message(self.sm, now, "carControl"):
-      return False
-    control = self.sm["carControl"]
-    return not (control.enabled or control.latActive or control.longActive or self.sm["selfdriveState"].active)
+    return parked_and_disengaged(self.sm, time.monotonic_ns())
 
   def applied_cruise_sync(self) -> int | None:
     return applied_cruise_sync(self._running_pid("card"))

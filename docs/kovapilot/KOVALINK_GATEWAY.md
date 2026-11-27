@@ -173,8 +173,8 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | `GET /v1/git/log?limit=20&cursor=0` | Current HEAD history and next offset |
 | `POST /v1/git/plan` | Validated switch or reset preview |
 | `POST /v1/git/switch`, `POST /v1/git/reset` | Operation-specific preview aliases |
-| `POST /v1/git/apply` | Queue a reviewed branch or commit for the offroad updater |
-| `POST /v1/device/restart` | Ask manager to reboot the offroad device |
+| `POST /v1/git/apply` | Queue a reviewed branch or commit for the updater (Park or offroad) |
+| `POST /v1/device/restart` | Ask manager to reboot the device, at any time |
 
 Telemetry frames include `schemaVersion: 2`, `monotonicTimeNanos` and
 `speedMps`. The frame can also include gear, turn signals, brake status,
@@ -197,9 +197,17 @@ If a fetch fails or reaches its deadline, the request returns `git_unavailable`.
 Reset previews also require a full `commit` SHA
 reachable from the selected ref. Plans return the target, current HEAD,
 dirty status, affected file count, restart requirement and a digest.
-`mutationEnabled` indicates whether the offroad updater accepts maintenance
+`mutationEnabled` indicates whether the updater accepts maintenance
 from this client. It requires bearer authorization over Wi-Fi, or native
-loopback, and an idle updater. Send the preview's operation, branch,
+loopback, the device offroad or stopped in Park with steering and
+longitudinal control released (the check Park settings use), updates not
+disabled, no update already waiting and an idle updater. Otherwise
+`mutationBlock` is `authorization` or `parkedOrUpdaterBusy` (gateways before
+2026-11-27 said `offroadOrUpdaterBusy` and required offroad). Many installs
+power the comma down with the ignition, so Park is enough. With a Link
+request queued or staged, manager keeps `updated` running with the vehicle on;
+it starts staging only offroad or in Park and fails the request if neither
+holds right before finalizing. Send the preview's operation, branch,
 optional reset commit and `planDigest` to `POST /v1/git/apply`. The server
 rechecks the installed checkout, clean worktree and fetched origin target.
 HTTP 202 returns the queued maintenance request. Status reports queued,
@@ -223,10 +231,14 @@ Telemetry frames also carry, display only:
 
 `GET /v1/git/status` also returns `restartEnabled`. `POST /v1/device/restart`
 sets `DoReboot`, the same request as the device's Reboot button, and returns
-HTTP 202 `{"restarting": true}`. It needs the same authorization as apply,
-an offroad device, an updater that is not finalizing, and no Link update
-still downloading; otherwise it returns 403 `restart_blocked`. A staged Link
-update is installed by that restart.
+HTTP 202 `{"restarting": true}`. It needs the same authorization as apply
+and nothing else (janpoo6427 2026-11-27): it works offroad, with the vehicle
+on and while driving, where it ends steering and longitudinal control at
+once, and while an update is written. Without authorization it returns 403
+`restart_blocked`. The launch script installs only an update that was
+finalized completely (`.overlay_consistent`), so a restart during a download
+or finalize keeps the installed version and the queued Link request starts
+again. A staged Link update is installed by that restart.
 
 Boot migrates old external Git LFS filter configuration to the included LFS
 client when the external command is missing.

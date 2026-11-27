@@ -1,6 +1,4 @@
-"""Restart the comma from KovaLink while it is offroad."""
-
-from openpilot.kovapilot.config.git_update_request import KEY as GIT_UPDATE_KEY
+"""Restart the comma from KovaLink at any time."""
 
 
 REBOOT_KEY = "DoReboot"
@@ -10,19 +8,15 @@ class RestartBlocked(ValueError):
   pass
 
 
-def restart_allowed(params, pc=False):
-  """Offroad and the updater is not writing a new checkout.
+def restart_allowed(pc=False):
+  """Any time on the device, offroad or on (janpoo6427 2026-11-27).
 
-  A restart then does what the device's own Reboot button does: manager
-  reboots, and the launch script installs an update only when it was
-  finalized completely. A Link update that is still downloading waits.
+  A restart does what the device's own Reboot button does: manager reboots,
+  and the launch script installs an update only when it was finalized
+  completely. While driving, a restart ends steering and longitudinal control
+  at once; the app asks before it sends the request.
   """
-  if pc or not params.get_bool("IsOffroad"):
-    return False
-  if str(params.get("UpdaterState") or "").startswith("finalizing"):
-    return False
-  request = params.get(GIT_UPDATE_KEY)
-  return not (isinstance(request, dict) and request.get("phase") == "queued")
+  return not pc
 
 
 class DeviceRestart:
@@ -36,5 +30,5 @@ class DeviceRestart:
   def restart(self, authorized):
     request = self.request
     if request is None or not self.enabled(authorized):
-      raise RestartBlocked("restart requires authorized access while offroad and not finalizing an update")
+      raise RestartBlocked("restart requires authorized access")
     request()

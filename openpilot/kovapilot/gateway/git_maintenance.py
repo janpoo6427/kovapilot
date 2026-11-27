@@ -77,7 +77,7 @@ class GitRepository:
       "upstream": self.run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", check=False).strip() or None,
       "updaterState": self.updater_state(),
       "mutationEnabled": enabled,
-      "mutationBlock": None if enabled or self.enqueue is None else ("offroadOrUpdaterBusy" if authorized else "authorization"),
+      "mutationBlock": None if enabled or self.enqueue is None else ("parkedOrUpdaterBusy" if authorized else "authorization"),
       "maintenance": pending,
       **({"dirty": True, "dirtyKnown": False} if self.pending() else self._worktree(self.run)),
     }
@@ -139,7 +139,7 @@ class GitRepository:
 
   def apply(self, operation, branch, commit, digest):
     if not self.can_apply(True):
-      raise GitApplyBlocked("offroad maintenance is unavailable")
+      raise GitApplyBlocked("maintenance needs Park or offroad and an idle updater")
     plan = self.plan(operation, branch, commit, authorized=True)
     if plan["dirty"] or not plan.get("dirtyKnown", True):
       raise GitApplyBlocked("working tree must be known and clean")
@@ -148,7 +148,7 @@ class GitRepository:
     if operation == "reset" and branch != plan["beforeBranch"]:
       raise GitApplyBlocked("reset must stay on the installed branch")
     if not self.can_apply(True):
-      raise GitApplyBlocked("offroad maintenance is unavailable")
+      raise GitApplyBlocked("maintenance needs Park or offroad and an idle updater")
     job = {**{key: plan[key] for key in PLAN_FIELDS}, "phase": "queued"}
     self.enqueue(job)
     return {"maintenance": describe_request(job)}

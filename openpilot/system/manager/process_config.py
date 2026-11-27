@@ -6,6 +6,7 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.hardware import PC, COMMA_HARDWARE
 from openpilot.kovapilot.bridges.cloud_upload import comma_connect_enabled, route_upload_enabled
+from openpilot.kovapilot.config.git_update_request import active_request as link_git_update_request
 from openpilot.kovapilot.config.driver_monitoring import monitoring_enabled
 from openpilot.kovapilot.gateway.runtime import runtime_ready
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
@@ -76,6 +77,11 @@ def navigation(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+def link_git_update(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # A KovaLink version change is accepted in Park with the vehicle on; updated
+  # waits for Park or offroad before it stages and finalizes the checkout.
+  return link_git_update_request(params) is not None
+
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("IsLiveStreaming")
 
@@ -131,7 +137,7 @@ procs = [
   PythonProcess("radard", "openpilot.selfdrive.controls.radard", only_onroad),
   PythonProcess("hardwared", "openpilot.system.hardware.hardwared", always_run),
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
-  PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
+  PythonProcess("updated", "openpilot.system.updated.updated", or_(only_offroad, link_git_update), enabled=not PC),
   PythonProcess("uploader", "openpilot.system.loggerd.uploader", cloud_upload),
   PythonProcess("kovalink_gateway_prepare", "openpilot.kovapilot.gateway.bootstrap", kovalink_gateway_prepare, enabled=COMMA_HARDWARE),
   PythonProcess("kovalink_gateway", "openpilot.kovapilot.gateway.__main__", kovalink_gateway),

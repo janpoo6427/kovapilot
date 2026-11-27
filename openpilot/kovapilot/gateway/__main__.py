@@ -69,6 +69,11 @@ def main() -> None:
   def is_offroad() -> bool:
     return device_state_params.get_bool("IsOffroad")
 
+  def parked_or_offroad() -> bool:
+    # Many installs power the comma down with the ignition, so changes from
+    # KovaLink also work stopped in Park with openpilot disengaged.
+    return is_offroad() or telemetry.is_parked_and_disengaged()
+
   owner_pairing = None
   if not PC and lan is not None and lan[0].token_digest is None:
     owner_pairing = OwnerPairing(lan[0], is_offroad, partial(show_pairing_code, device_state_params))
@@ -84,22 +89,19 @@ def main() -> None:
                                            telemetry.is_parked_and_disengaged),
     git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState"),
                       maintenance_state=lambda: device_state_params.get(GIT_UPDATE_KEY),
-                      apply_allowed=lambda: (not PC and device_state_params.get_bool("IsOffroad")
+                      apply_allowed=lambda: (not PC and parked_or_offroad()
                                              and not device_state_params.get_bool("DisableUpdates")
                                              and not device_state_params.get_bool("UpdateAvailable")
                                              and device_state_params.get("UpdaterState") == "idle"),
                       enqueue=lambda job: device_state_params.put(GIT_UPDATE_KEY, job, block=True)),
     lan_access=lan[0] if lan else None,
-    restart=DeviceRestart(partial(restart_allowed, device_state_params, PC),
+    restart=DeviceRestart(partial(restart_allowed, PC),
                           lambda: device_state_params.put_bool(REBOOT_KEY, True, block=True)),
     owner_pairing=owner_pairing,
   )
   if not PC and lan is not None:
     tailscale_directory = choose_directory(provisioned.parent / "tailscale", DEVICE_PACKAGES.parent.parent / "tailscale")
-    def vpn_change_allowed() -> bool:
-      return is_offroad() or telemetry.is_parked_and_disengaged()
-
-    tailscale = Tailscale(tailscale_directory, lan[0], vpn_change_allowed, telemetry, vpn_device_info,
+    tailscale = Tailscale(tailscale_directory, lan[0], parked_or_offroad, telemetry, vpn_device_info,
                           installer=partial(install_tailscale, tailscale_directory, DEVICE_PACKAGES.parent))
     tailscale.attach(app)
     # The owner's phone over the VPN: TLS on 127.0.0.1:TAILNET_PORT, and the

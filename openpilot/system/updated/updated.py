@@ -19,6 +19,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import AGNOS, HARDWARE
 from openpilot.kovapilot.config.git_update_request import KEY as LINK_GIT_UPDATE, active_request
+from openpilot.kovapilot.config.parked_setting import PARKED_AND_DISENGAGED_SERVICES, parked_and_disengaged
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -238,6 +239,20 @@ class Updater:
     self.params = Params()
     self.branches = defaultdict(str)
     self._has_internet: bool = False
+    self._parked_sm = None
+
+  def link_maintenance_allowed(self) -> bool:
+    """Offroad, or stopped in Park with openpilot disengaged (the KovaLink settings check)."""
+    if self.params.get_bool("IsOffroad"):
+      return True
+    if getattr(self, "_parked_sm", None) is None:
+      from openpilot.cereal.messaging import SubMaster
+      self._parked_sm = SubMaster(list(PARKED_AND_DISENGAGED_SERVICES))
+    for _ in range(10):
+      self._parked_sm.update(100)
+      if parked_and_disengaged(self._parked_sm, time.monotonic_ns()):
+        return True
+    return False
 
   @property
   def has_internet(self) -> bool:
@@ -428,8 +443,8 @@ class Updater:
 
     # Create the finalized, ready-to-swap update
     self.params.put("UpdaterState", "finalizing update...", block=True)
-    if link_request is not None and not self.params.get_bool("IsOffroad"):
-      raise ValueError("offroad maintenance ended")
+    if link_request is not None and not self.link_maintenance_allowed():
+      raise ValueError("Park or offroad maintenance ended")
     finalize_update(link_requested=link_request is not None)
     cloudlog.info("finalize success!")
 
@@ -462,7 +477,7 @@ class Updater:
         set_consistent_flag(False)
         finish("failed", "stagingMissing")
         return
-      if not self.params.get_bool("IsOffroad"):
+      if not self.link_maintenance_allowed():
         return
       changes = run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1",
                      "--untracked-files=normal", "--ignore-submodules=none"], BASEDIR)

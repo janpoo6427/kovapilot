@@ -308,9 +308,9 @@ class KovaParamsStore:
       raise KovaParamsReadOnlyError(f"setting is read-only: {key}")
     if setting.get("savePolicy") == "parked" and not is_parked:
       raise KovaParamsApplyPolicyError(f"setting can only be saved when parked and disengaged: {key}")
-    if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "offroad" and not is_offroad:
-      raise KovaParamsApplyPolicyError(f"setting can only be changed offroad: {key}")
-    if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] == "parked" and not (is_offroad or is_parked):
+    # Offroad settings run from the next start but are saved in Park as well:
+    # many installs power the comma down with the ignition.
+    if setting.get("savePolicy") != "anytime" and setting["applyPolicy"] in ("offroad", "parked") and not (is_offroad or is_parked):
       raise KovaParamsApplyPolicyError(f"setting can only be changed when parked or offroad: {key}")
     _validate_value(setting, value)
 
