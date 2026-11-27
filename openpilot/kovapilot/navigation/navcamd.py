@@ -174,7 +174,7 @@ def navigation_message(state: dict):
 
 
 def _udp_socket(address: str, port: int, *, broadcast: bool = False) -> socket.socket:
-  from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE
+  from openpilot.kovapilot.gateway.wifi import WIFI_INTERFACE
   sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
   try:
     if broadcast:
@@ -210,7 +210,7 @@ class Network:
   def refresh(self, now_ns: int) -> None:
     if self.refreshed_ns is not None and now_ns - self.refreshed_ns < NETWORK_REFRESH_NS:
       return
-    from openpilot.kovapilot.gateway.lan import wifi_address
+    from openpilot.kovapilot.gateway.wifi import wifi_address
     self.refreshed_ns = now_ns
     interface = wifi_address()
     if interface != self.interface:
@@ -262,7 +262,7 @@ def _advertisement(version: str, sm, nav: NavCamera, ip: str) -> bytes:
 
 
 def main():
-  from openpilot.kovapilot.gateway.lan import WIFI_INTERFACE
+  from openpilot.kovapilot.gateway.wifi import WIFI_INTERFACE
 
   params = Params()
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
