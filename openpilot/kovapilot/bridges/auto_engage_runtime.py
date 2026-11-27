@@ -6,6 +6,8 @@ from openpilot.common.constants import CV
 from openpilot.kovapilot.config.auto_engage_settings import publish_auto_engage_status, read_auto_engage, read_auto_engage_status
 from openpilot.kovapilot.config.parked_setting import fresh_message, stopped_in_park
 from openpilot.kovapilot.engagement.auto_engage import AutoEngage, AutoEngageInputs
+from openpilot.kovapilot.engagement.pedal_resume import PedalResume, PedalResumeInputs
+from openpilot.kovapilot.vehicle.pedal_resume import pedal_resume_enabled
 from openpilot.selfdrive.car.cruise import V_CRUISE_INITIAL, V_CRUISE_MAX
 from openpilot.selfdrive.selfdrived.events import ET
 
@@ -13,6 +15,8 @@ from openpilot.selfdrive.selfdrived.events import ET
 IGNORED_MODES = (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput)
 ButtonType = car.CarState.ButtonEvent.Type
 MANUAL_SELECTION_BUTTONS = (ButtonType.cancel, ButtonType.lkas, ButtonType.mainCruise)
+SET_RESUME_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.setCruise, ButtonType.resumeCruise)
+ENTRY_BLOCKING_EVENTS = (ET.NO_ENTRY, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE, ET.USER_DISABLE)
 # The saved preference is re-read while driving. Turning it off stops any later
 # automatic start at once; turning it on only arms the next departure from Park.
 PREFERENCE_POLL_NS = 1_000_000_000
@@ -53,6 +57,9 @@ class AutoEngageRuntime:
     self.last_publish = 0
     self.last_status: tuple[str, str] | None = None
     self.next_preference_read = 0
+    # pedal resume: re-engage on the driver's brake/accelerator release (panda ALT_EXP_PEDAL_RESUME)
+    self.pedal = PedalResume() if self.supported and pedal_resume_enabled(cp) else None
+    self.disengage_on_accelerator = False
 
   def _start_session(self, session: int, now_ns: int) -> None:
     self.session = session
@@ -84,12 +91,16 @@ class AutoEngageRuntime:
       self.next_preference_read = now_ns + PREFERENCE_POLL_NS
 
     request = False
+    pedal_request = self.pedal is not None and self._update_pedal(cs, sm, events, initialized, enabled, now_ns)
     if not self.supported:
       status = ("unsupported", "unsupported")
     elif not self.requested:
       status = ("off", "off")
     else:
       request, status = self._update_supported(cs, sm, events, initialized, enabled, now_ns)
+      request = request or pedal_request
+      if self.pedal is not None and not enabled and status == ("manualRequired", "manualRequired") and self.pedal.waiting():
+        status = ("waiting", "waiting")
     if status != self.last_status or now_ns - self.last_publish >= 1_000_000_000:
       try:
         publish_auto_engage_status(self.session, now_ns, self.requested, *status)
@@ -99,6 +110,25 @@ class AutoEngageRuntime:
       self.last_status = status
       self.last_publish = now_ns
     return request
+
+  def _update_pedal(self, cs, sm, events, initialized: bool, enabled: bool, now_ns: int) -> bool:
+    try:
+      lead = sm["radarState"].leadOne
+      lead_distance = lead.dRel if lead.present and fresh_message(sm, now_ns, "radarState") else 0.0
+    except KeyError:
+      lead_distance = 0.0
+    authority = fresh_message(sm, now_ns, "pandaStates") and has_control_authority(self.cp, sm["pandaStates"])
+    entry_ok = initialized and cs.canValid and not any(events.contains(event_type) for event_type in ENTRY_BLOCKING_EVENTS)
+    return self.pedal.update(PedalResumeInputs(
+      now_ns=now_ns, enabled=enabled, driving=cs.gearShifter == car.CarState.GearShifter.drive and cs.canValid,
+      cruise_available=cs.cruiseState.available, brake_pressed=cs.brakePressed, gas_pressed=cs.gasPressed,
+      v_ego=cs.vEgo, v_ego_cluster=cs.vEgoCluster, a_ego=cs.aEgo, steering_angle_deg=cs.steeringAngleDeg,
+      blinker=cs.leftBlinker or cs.rightBlinker, hold=cs.brakeHoldActive or cs.parkingBrake,
+      cancel_pressed=any(button.type == ButtonType.cancel for button in cs.buttonEvents),
+      set_resume_released=any(button.type in SET_RESUME_BUTTONS and not button.pressed for button in cs.buttonEvents),
+      lead_distance=lead_distance, disengage_on_accelerator=self.disengage_on_accelerator,
+      authority=authority, entry_ok=entry_ok,
+    ))
 
   def _update_supported(self, cs, sm, events, initialized: bool, enabled: bool, now_ns: int) -> tuple[bool, tuple[str, str]]:
     driving = cs.gearShifter == car.CarState.GearShifter.drive

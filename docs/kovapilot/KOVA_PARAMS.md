@@ -53,6 +53,12 @@ The automatic request requires an observed Park state, a fresh accelerator input
 
 During an active engagement, the existing control loop continues to handle temporary steering and accelerator overrides. The automatic request does not grant independent steering or stock cruise authority.
 
+### Pedal resume (Hyundai/Kia/Genesis CAN FD with openpilot longitudinal)
+
+With `engagement.auto_engage` On at the start of a vehicle session, card also sets the panda flag `ALT_EXP_PEDAL_RESUME`. Panda then allows controls on the driver's own brake release or accelerator release seen on the car bus, while TCS reports cruise available and no CANCEL was pressed since the last SET/RES. Brake, CANCEL and cruise unavailable still end control authority at once; if openpilot does not engage, the heartbeat check ends it within about 3 seconds.
+
+`selfdrived` requests engagement at those releases with the carrot automatic-cruise start conditions (`selfdrive/car/cruise.py` `_update_cruise_state`): brake release while moving; brake release at a standstill with a lead closer than 20 m and the wheel under 20 degrees; accelerator release from 30 km/h, or an accelerator tap shorter than 0.4 s at any speed, unless the accelerator disengages (`DisengageOnAccelerator`); an accelerator release with a lead closer than 0.8 s of travel only below 1 m/s. It does not start with a turn signal on, the wheel at 70 degrees or more, brake hold or the parking brake, outside Drive or in the first 20 s in Drive, within 5 s of holding the accelerator while slowing, or after CANCEL until SET/RES. The MAIN and LFA buttons do not block it. The request waits up to 0.5 s for panda authority and goes through the normal entry checks. Carrot's other automatic starts (soft hold at a stop, forward collision distance, desired speed, traffic light) are not made.
+
 ## Automatic lane change
 
 `steering.auto_lane_change` (`자동 차선 변경`) defaults to `0`. Off keeps the stock `DesireHelper` (turn signal, then a nudge on the wheel). On, `openpilot/kovapilot/lateral/auto_lane_change.py` lets a lane change start without the nudge 1 s after the driver turns on one turn signal, only while openpilot is engaged (not always-on steering alone), at 30 km/h or more (`AUTO_LANE_CHANGE_MIN_SPEED`), with driver monitoring off or not warning, and once per turn signal. Braking or steering the other way before the start cancels it for that turn signal. It applies at once outside a lane change. The Gateway condition `blindSpotMonitor` is `met` on Hyundai/Kia/Genesis vehicles with `HAS_BSM`.

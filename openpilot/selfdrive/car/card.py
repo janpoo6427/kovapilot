@@ -15,6 +15,8 @@ from openpilot.kovapilot.bridges.cruise_accelerator_sync import CruiseAccelerato
 from openpilot.kovapilot.config.cruise_sync_settings import publish_applied_cruise_sync, read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
 from openpilot.kovapilot.vehicle.always_lateral import apply_always_on_lateral, read_always_on_steering
+from openpilot.kovapilot.vehicle.pedal_resume import apply_pedal_resume
+from openpilot.kovapilot.config.auto_engage_settings import read_auto_engage
 
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -123,6 +125,8 @@ class Car:
 
     # always-on lateral (steering.always_on) is chosen once per session, before pandad sets panda safety
     apply_always_on_lateral(self.CP, read_always_on_steering(KovaParamsStore(ParamsKovaParamsBackend(self.params))))
+    # pedal resume (engagement.auto_engage) panda flag, also chosen once per session
+    apply_pedal_resume(self.CP, read_auto_engage(self.params))
 
     if self.CP.secOcRequired:
       # Copy user key if available
