@@ -8,13 +8,16 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.mici.layouts.settings.initial_cruise_speed import InitialCruiseSpeedButton
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
+# the fourth (moreRelaxed) is offered only on a car whose own cruise gap has four levels
+PERSONALITY_OPTIONS = ["aggressive", "standard", "relaxed", "more relaxed"]
 
 
 class DrivingLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
 
-    self._personality_toggle = BigMultiParamToggle("driving personality", "LongitudinalPersonality", ["aggressive", "standard", "relaxed"],
+    self._personality_toggle = BigMultiParamToggle("driving personality", "LongitudinalPersonality",
+                                                   PERSONALITY_OPTIONS[:ui_state.personality_levels],
                                                    description="Standard is recommended.\n" +
                                                                "Aggressive follows closer, with firmer gas and braking.\n" +
                                                                "Relaxed leaves more space.\n" +
@@ -53,8 +56,14 @@ class DrivingLayoutMici(NavScroller):
 
     ui_state.add_engaged_transition_callback(self._update_toggles)
 
+  def _update_personality_levels(self):
+    levels = ui_state.personality_levels
+    if len(self._personality_toggle._options) != levels:
+      self._personality_toggle.set_options(PERSONALITY_OPTIONS[:levels])
+
   def _update_state(self):
     super()._update_state()
+    self._update_personality_levels()
 
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
@@ -68,6 +77,7 @@ class DrivingLayoutMici(NavScroller):
 
   def _update_toggles(self):
     ui_state.update_params()
+    self._update_personality_levels()
     self._initial_cruise_speed.refresh()
 
     if ui_state.CP is not None:

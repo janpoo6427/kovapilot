@@ -768,6 +768,10 @@ msgstr ""
 msgid "Relaxed"
 msgstr ""
 
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Relaxed+"
+msgstr ""
+
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "MAX"
 msgstr ""

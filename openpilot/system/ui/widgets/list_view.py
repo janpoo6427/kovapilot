@@ -223,6 +223,13 @@ class MultipleButtonAction(ItemAction):
     if 0 <= index < len(self.buttons):
       self.selected_button = index
 
+  def set_buttons(self, buttons: list[str | Callable[[], str]], button_width: int | None = None):
+    self.buttons = buttons
+    if button_width is not None:
+      self.button_width = button_width
+    self._rect.width = len(buttons) * self.button_width + (len(buttons) - 1) * RIGHT_ITEM_PADDING
+    self.selected_button = min(self.selected_button, len(buttons) - 1)
+
   def _render(self, rect: rl.Rectangle):
     spacing = RIGHT_ITEM_PADDING
     button_y = rect.y + (rect.height - BUTTON_HEIGHT) / 2

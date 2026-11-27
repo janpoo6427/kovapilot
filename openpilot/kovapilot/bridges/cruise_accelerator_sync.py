@@ -38,6 +38,7 @@ class CruiseAcceleratorSyncBridge:
     eligible = (mode_allowed and inputs_valid and cruise_engaged and not disengage_on_accelerator and
                 CS.cruiseState.available and not stopped_or_braking and not CS.accFaulted and
                 not (manual_input or CS.buttonEnable or CC.cruiseControl.resume))
+    step_kph = 1.0 if is_metric else CV.MPH_TO_KPH
     target_kph = self.policy.update(
       eligible=eligible,
       can_arm=stock or CC.longActive,
@@ -45,7 +46,7 @@ class CruiseAcceleratorSyncBridge:
       speed_kph=CS.vEgo * CV.MS_TO_KPH,
       release_speed_kph=(CS.vEgoCluster if stock else CS.vEgo) * CV.MS_TO_KPH,
       set_speed_kph=self.cruise.v_cruise_cluster_kph if stock else self.cruise.v_cruise_kph,
-      step_kph=1.0 if is_metric else CV.MPH_TO_KPH,
+      step_kph=step_kph,
       max_speed_kph=V_CRUISE_MAX,
     )
     if target_kph is not None:
@@ -57,4 +58,6 @@ class CruiseAcceleratorSyncBridge:
       target_kph = round(target_kph, 1)
       if target_kph > self.cruise.v_cruise_kph:
         self.cruise.v_cruise_kph = self.cruise.v_cruise_cluster_kph = target_kph
+        # while the pedal is still held the set speed keeps following; this change is ours, not the driver's
+        self.policy.follow_setpoint(self.cruise.v_cruise_kph, step_kph)
     return None

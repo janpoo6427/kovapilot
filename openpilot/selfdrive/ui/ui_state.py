@@ -144,6 +144,13 @@ class UIState:
   def engaged(self) -> bool:
     return self.started and self.sm["selfdriveState"].enabled
 
+  @property
+  def personality_levels(self) -> int:
+    """Distance levels of this car: four once it reported its own cruise gap level 4, else three."""
+    if self.started and self.sm["selfdriveState"].personalityLevels == FOUR_GAP_LEVELS:
+      return FOUR_GAP_LEVELS
+    return self.personality_levels_param
+
   def is_onroad(self) -> bool:
     return self.started
 

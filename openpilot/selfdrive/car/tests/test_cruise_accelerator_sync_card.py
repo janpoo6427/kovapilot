@@ -118,3 +118,44 @@ def test_storage_initialization_preserves_an_invalid_native_params_file(tmp_path
     KovaParamsStore(ParamsKovaParamsBackend(params)).initialize_storage()
 
   assert path.read_text(encoding="utf-8") == "null"
+
+
+def test_card_publishes_the_set_speed_while_the_pedal_is_held(monkeypatch):
+  instance = object.__new__(card.Car)
+  instance.CP = car.CarParams(openpilotLongitudinalControl=True)
+  instance.v_cruise_helper = VCruiseHelper(instance.CP)
+  instance.v_cruise_helper.initialize_v_cruise(car.CarState(), 60)
+  instance.cruise_accelerator_sync = CruiseAcceleratorSyncBridge(instance.v_cruise_helper)
+  instance.cruise_sync_settings = (True, False, False)
+  instance.is_metric = True
+  instance.can_rcv_cum_timeout_counter = 0
+  instance.initialized_prev = True
+  instance.can_sock = None
+  instance.CC_prev = car.CarControl(enabled=True)
+
+  class SubMaster(dict):
+    def update(self, timeout):
+      pass
+
+    def all_checks(self, services):
+      return True
+
+  instance.sm = SubMaster(carControl=instance.CC_prev, onroadEvents=[])
+  instance.RI = SimpleNamespace(update=lambda _: None)
+  monkeypatch.setattr(card, "can_capnp_to_list", lambda _: [])
+  monkeypatch.setattr(card, "REPLAY", False)
+  monkeypatch.setattr(card.messaging, "drain_sock_raw", lambda *args, **kwargs: [b"CAN"])
+
+  def step(speed_kph, pressed, *, long_active=False):
+    instance.sm["carControl"].longActive = long_active
+    state = car.CarState(canValid=True, gasPressed=pressed, vEgo=speed_kph * CV.KPH_TO_MS, cruiseState={"available": True})
+    instance.CI = SimpleNamespace(update=lambda _: state)
+    return instance.state_update()[0]
+
+  assert step(60.0, False, long_active=True).vCruise == 60.0
+  for _ in range(MIN_PRESS_SAMPLES):
+    assert step(60.0, True).vCruise == 60.0
+  published = [step(speed, True) for speed in (65.0, 71.0, 70.0)]
+  assert [(s.vCruise, s.vCruiseCluster) for s in published] == [(65.0, 65.0), (71.0, 71.0), (71.0, 71.0)]
+  released = step(69.0, False)
+  assert released.vCruise == released.vCruiseCluster == 71.0

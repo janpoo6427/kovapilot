@@ -8,6 +8,11 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.layouts.settings.initial_cruise_speed import InitialCruiseSpeedControl
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
+# the fourth (moreRelaxed) is offered only on a car whose own cruise gap has four levels; four buttons are narrower
+# so the row stays right of the icon and title: 4 * 225 + 3 * 20 = 960 px starts at 600 on the 1560 px tici item, the
+# English title ends at 572 (the 4 * 255 row would start at 492, over the title)
+PERSONALITY_BUTTONS = [lambda: tr("Aggressive"), lambda: tr("Standard"), lambda: tr("Relaxed"), lambda: tr("Relaxed+")]
+PERSONALITY_BUTTON_WIDTH = {3: 255, 4: 225}
 
 # Description constants
 DESCRIPTIONS = {
@@ -83,13 +88,14 @@ class TogglesLayout(Widget):
       ),
     }
 
+    levels = ui_state.personality_levels
     self._long_personality_setting = multiple_button_item(
       lambda: tr("Driving Personality"),
       lambda: tr(DESCRIPTIONS["LongitudinalPersonality"]),
-      buttons=[lambda: tr("Aggressive"), lambda: tr("Standard"), lambda: tr("Relaxed")],
-      button_width=255,
+      buttons=PERSONALITY_BUTTONS[:levels],
+      button_width=PERSONALITY_BUTTON_WIDTH[levels],
       callback=self._set_longitudinal_personality,
-      selected_index=min(self._params.get("LongitudinalPersonality", return_default=True), 2),
+      selected_index=min(self._params.get("LongitudinalPersonality", return_default=True), levels - 1),
       icon="speed_limit.png"
     )
 
@@ -139,11 +145,19 @@ class TogglesLayout(Widget):
 
     ui_state.add_engaged_transition_callback(self._update_toggles)
 
+  def _update_personality_levels(self):
+    action = self._long_personality_setting.action_item
+    levels = ui_state.personality_levels
+    if len(action.buttons) != levels:
+      action.set_buttons(PERSONALITY_BUTTONS[:levels], PERSONALITY_BUTTON_WIDTH[levels])
+      action.set_selected_button(min(self._params.get("LongitudinalPersonality", return_default=True), levels - 1))
+
   def _update_state(self):
+    self._update_personality_levels()
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
       if personality != ui_state.personality and ui_state.started:
-        self._long_personality_setting.action_item.set_selected_button(min(personality, 2))
+        self._long_personality_setting.action_item.set_selected_button(min(personality, ui_state.personality_levels - 1))
       ui_state.personality = personality
 
   def show_event(self):
@@ -153,6 +167,7 @@ class TogglesLayout(Widget):
 
   def _update_toggles(self):
     ui_state.update_params()
+    self._update_personality_levels()
     self._initial_cruise_speed.action_item.refresh()
 
     if ui_state.CP is not None:

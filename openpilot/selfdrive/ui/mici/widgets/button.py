@@ -333,6 +333,12 @@ class BigMultiToggle(BigToggle):
 
     self.set_value(self._options[0])
 
+  def set_options(self, options: list[str]):
+    assert len(options) > 0
+    index = self._options.index(self.value) if self.value in self._options else 0
+    self._options = options
+    self.set_value(options[min(index, len(options) - 1)])
+
   def _handle_mouse_release(self, mouse_pos: MousePos):
     super()._handle_mouse_release(mouse_pos)
     cur_idx = self._options.index(self.value)
@@ -437,6 +443,10 @@ class BigMultiParamToggle(BigMultiToggle):
 
   def _load_value(self):
     self.set_value(self._options[min(self._params.get(self._param) or 0, len(self._options) - 1)])
+
+  def set_options(self, options: list[str]):
+    super().set_options(options)
+    self._load_value()
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
     super()._handle_mouse_release(mouse_pos)

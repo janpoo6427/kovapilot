@@ -500,6 +500,10 @@ msgstr "규제 정보"
 msgid "Relaxed"
 msgstr "편안한"
 
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Relaxed+"
+msgstr "더 편안한"
+
 #: openpilot/selfdrive/ui/widgets/prime.py
 msgid "Remote access"
 msgstr "원격 액세스"
