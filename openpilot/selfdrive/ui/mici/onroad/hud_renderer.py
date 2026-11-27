@@ -110,6 +110,7 @@ class HudRenderer(Widget):
     self._txt_chestnut_orange: rl.Texture = gui_app.texture('icons_mici/chestnut_orange.png', 61, 36)
     self._chestnut_icon: rl.Texture | None = None
     self._wheel_critical_filter = FirstOrderFilter(0, STATUS_FADE_RC, 1 / gui_app.target_fps)
+    self._wheel_lateral_only_filter = FirstOrderFilter(0, STATUS_FADE_RC, 1 / gui_app.target_fps)
 
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
     self._set_speed_alpha = 0.0
@@ -198,12 +199,14 @@ class HudRenderer(Widget):
     rl.draw_texture_ex(icon, pos, 0.0, 1.0, rl.Color(255, 255, 255, int(255 * opacity * alpha)))
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
-    # The wheel is the source of truth for engagement: green if and only if openpilot is engaged.
-    # When disengaged it's grayed out, except for steerRequired alerts which show it orange.
+    # The wheel is the source of truth for engagement: green if and only if openpilot steers
+    # (engaged, or always-on steering while not engaged). Otherwise it's grayed out,
+    # except for steerRequired alerts which show it orange.
     critical = self._wheel_critical_filter.update(self._show_wheel_critical)
-    idle_color = lerp_color(WHEEL_WHITE, WHEEL_ORANGE, critical)
+    lateral_only = self._wheel_lateral_only_filter.update(ui_state.lateral_only) * (1 - critical)
+    idle_color = lerp_color(lerp_color(WHEEL_WHITE, WHEEL_ORANGE, critical), WHEEL_GREEN, lateral_only)
     wheel_color = status_fade.color({UIStatus.ENGAGED: WHEEL_GREEN, UIStatus.OVERRIDE: idle_color, UIStatus.DISENGAGED: idle_color})
-    engaged = status_fade.weight(UIStatus.ENGAGED)
+    engaged = max(status_fade.weight(UIStatus.ENGAGED), lateral_only)
     glow = engaged + (1 - engaged) * critical
     wheel_txt = self._txt_wheel
 
@@ -212,7 +215,7 @@ class HudRenderer(Widget):
     pos_y = int(rect.y + rect.height - 10 - wheel_txt.height / 2)
     rotation = -ui_state.sm['carState'].steeringAngleDeg if ui_state.started and ui_state.received_since_started('carState') else 0.0
 
-    alpha = 255 * (1 - (1 - DIMMED_ICON_ALPHA) * status_fade.weight(UIStatus.DISENGAGED) * (1 - critical))
+    alpha = 255 * (1 - (1 - DIMMED_ICON_ALPHA) * status_fade.weight(UIStatus.DISENGAGED) * (1 - critical) * (1 - lateral_only))
     origin = rl.Vector2(self._txt_wheel_glow.width / 2, self._txt_wheel_glow.height / 2)
     rl.draw_texture_pro(self._txt_wheel_glow, rl.Rectangle(0, 0, self._txt_wheel_glow.width, self._txt_wheel_glow.height),
                         rl.Rectangle(pos_x, pos_y, self._txt_wheel_glow.width, self._txt_wheel_glow.height), origin, rotation,

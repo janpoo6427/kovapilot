@@ -86,6 +86,8 @@ class UIState:
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
+    # openpilot steers while not engaged (always-on steering, steering.always_on)
+    self.lateral_only: bool = False
     self._started_frame: int = 0
     self.started_time: float = 0.0
     self._engaged_prev: bool = False
@@ -207,6 +209,7 @@ class UIState:
         self.status = UIStatus.OVERRIDE
       else:
         self.status = UIStatus.ENGAGED if ss.enabled else UIStatus.DISENGAGED
+      self.lateral_only = not ss.enabled and self.sm["carControl"].latActive
 
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
@@ -217,6 +220,7 @@ class UIState:
     # Handle onroad/offroad transition
     if self.started != self._started_prev or self.sm.frame == 1:
       self.status = UIStatus.DISENGAGED
+      self.lateral_only = False
       if self.started:
         self._started_frame = self.sm.frame
         self.started_time = time.monotonic()
