@@ -1,7 +1,7 @@
 """Always-on lateral (steering.always_on): steering assist that outlives cruise.
 
 Panda safety (ALT_EXP_ALWAYS_ON_LATERAL) allows lateral commands without cruise after a
-driver engagement while the car moves, the brake is released and the RX checks are valid.
+driver engagement while the car moves and the RX checks are valid, also while the driver brakes.
 This runtime owns the openpilot side, which must stay within that permission:
 
 - arm: a cruise engagement (openpilot enabled rising edge), or the LFA button where the
@@ -9,8 +9,9 @@ This runtime owns the openpilot side, which must stay within that permission:
 - disarm (needs a new request): LFA button again, P or R, a system or steering fault (as
   openpilot would soft or immediately disable), terminal driver monitoring alert or lockout,
   or panda safety blocking our steering frames.
-- pause (resumes by itself): brake, driver steering until released, and in controlsd
-  standstill and steering faults that openpilot only warns about.
+- pause (resumes by itself): regen braking, driver steering until released, and in controlsd
+  standstill and steering faults that openpilot only warns about. The brake pedal ends cruise
+  (longitudinal) only; steering continues while the driver brakes.
 """
 from openpilot.cereal import log
 from opendbc.car.structs import car
@@ -96,7 +97,7 @@ class AlwaysLateralRuntime:
       driver_steering=CS.steeringPressed,
       driver_release_confirmed=self.released_frames >= DRIVER_RELEASE_FRAMES,
     ))
-    self.active = self.state is LateralState.ACTIVE and not (CS.brakePressed or CS.regenBraking)
+    self.active = self.state is LateralState.ACTIVE and not CS.regenBraking
 
     # alerts only matter while openpilot is not engaged, otherwise its own alerts apply
     owner = self.engaged and not enabled

@@ -86,18 +86,40 @@ def test_cruise_engagement_outlives_cruise_with_one_alert():
   assert d.step(n=50) == []
 
 
-def test_brake_pauses_and_release_resumes():
+def test_brake_keeps_steering():
   d = Drive()
   d.cruise_engage_then_cancel()
   d.cs.brakePressed = True
-  assert d.step() == []
-  assert d.rt.engaged and not d.rt.active
+  assert d.step(n=50) == []
+  assert d.rt.engaged and d.rt.active
   d.cs.brakePressed = False
   d.step()
   assert d.rt.active
   d.cs.regenBraking = True
   d.step()
   assert not d.rt.active
+
+
+def test_brake_that_ends_cruise_keeps_steering():
+  d = Drive()
+  d.enabled = True
+  d.step()
+  # the brake disengages openpilot (cruise), always-on lateral keeps steering with one alert
+  d.cs.brakePressed = True
+  d.enabled = False
+  assert d.step() == [EventName.alwaysLateralEngaged]
+  assert d.rt.engaged and d.rt.active
+  assert d.step(EventName.pedalPressed, n=20) == []
+  assert d.rt.active
+
+
+def test_panda_blocking_our_steering_while_braking_turns_it_off():
+  d = Drive()
+  d.cruise_engage_then_cancel()
+  d.cs.brakePressed = True
+  d.panda(100)
+  d.panda(100 + 2 * TX_BLOCKED_LIMIT + 10)
+  assert not d.rt.engaged
 
 
 def test_driver_steering_pauses_until_released():
@@ -218,7 +240,7 @@ def test_panda_blocks_are_ignored_while_openpilot_is_engaged_or_paused():
   assert d.rt.engaged
   d.enabled = False
   d.step()
-  d.cs.brakePressed = True
+  d.cs.steeringPressed = True
   d.step()
   d.panda(1500)
   d.panda(2000)
