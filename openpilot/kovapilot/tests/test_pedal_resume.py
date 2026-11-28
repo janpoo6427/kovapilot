@@ -1,5 +1,6 @@
 """Pedal resume: re-engage on the driver's brake release or accelerator press (janpoo 11/27 19:19
-option 2; accelerator press instead of release 11/27 21:35).
+option 2; accelerator press instead of release 11/27 21:35), and also on the accelerator release
+without the 30 km/h floor (janpoo 11/28).
 
 Start conditions follow carrot's automatic cruise start for those pedal moments; panda allows controls
 on the same moments (opendbc ALT_EXP_PEDAL_RESUME)."""
@@ -67,9 +68,10 @@ def test_brake_release_at_standstill_needs_a_close_lead_and_straight_wheel():
   assert not Driver(**stopped, lead_distance=12.0, steering_angle_deg=25.0).brake_tap()
 
 
-def test_accelerator_press_resumes_from_30_kph():
+def test_accelerator_press_resumes_at_any_speed():
+  # janpoo 11/28: no 30 km/h floor
   assert Driver(v_ego=30 / 3.6, v_ego_cluster=30 / 3.6).gas_press()
-  assert not Driver(v_ego=20 / 3.6, v_ego_cluster=20 / 3.6).gas_press()
+  assert Driver(v_ego=20 / 3.6, v_ego_cluster=20 / 3.6).gas_press()
   # a lead too close for the speed blocks it
   assert not Driver(lead_distance=8.0).gas_press()
   assert not Driver(disengage_on_accelerator=True).gas_press()
@@ -81,24 +83,19 @@ def test_accelerator_press_engages_while_still_pressed():
   assert driver.step(gas_pressed=True, authority=True)
 
 
-def test_accelerator_release_does_not_resume():
-  # a press that did not start (turn signal), then the release: no start at the release
+def test_accelerator_release_with_the_turn_signal_still_on_does_not_resume():
+  # a press that did not start (turn signal), then the release with the signal still on: no start
   driver = Driver(v_ego=40 / 3.6, v_ego_cluster=40 / 3.6)
   assert not driver.gas_press(blinker=True)
-  assert not any(driver.hold(100, gas_pressed=True))
-  assert not driver.step()
+  assert not any(driver.hold(100, gas_pressed=True, blinker=True))
+  assert not driver.step(blinker=True)
   assert not any(driver.hold(60))
-  # pressed below 30 km/h and released above it
-  driver = Driver(v_ego=20 / 3.6, v_ego_cluster=20 / 3.6)
-  assert not driver.gas_press()
-  assert not any(driver.hold(100, gas_pressed=True, v_ego=40 / 3.6, v_ego_cluster=40 / 3.6))
-  assert not driver.step(v_ego=40 / 3.6, v_ego_cluster=40 / 3.6)
 
 
-def test_accelerator_tap_is_a_press():
-  # carrot's tap start at any speed is not made: a tap starts at the press with the press conditions
-  assert not Driver(v_ego=0.0, v_ego_cluster=0.0).gas_release(frames=20)
-  assert not Driver(v_ego=20 / 3.6, v_ego_cluster=20 / 3.6).gas_release(frames=20)
+def test_accelerator_tap_starts_at_the_press():
+  # a tap starts at the press, at any speed
+  assert Driver(v_ego=0.0, v_ego_cluster=0.0).gas_press()
+  assert Driver(v_ego=20 / 3.6, v_ego_cluster=20 / 3.6).gas_press()
   driver = Driver(v_ego=40 / 3.6, v_ego_cluster=40 / 3.6)
   assert driver.gas_press()
   assert not any(driver.hold(10, enabled=True))
@@ -164,8 +161,8 @@ def test_entry_checks_and_brake_cancel_the_pending_start():
 
 def test_accelerator_held_while_braking_hard_blocks_for_5_seconds():
   driver = Driver()
-  # pressed below 30 km/h so that the press itself does not start
-  assert not any(driver.hold(60, gas_pressed=True, a_ego=-1.0, v_ego=20 / 3.6, v_ego_cluster=20 / 3.6))
+  # a turn signal keeps the press itself from starting; the release after it is blocked as well
+  assert not any(driver.hold(60, gas_pressed=True, a_ego=-1.0, blinker=True, v_ego=20 / 3.6, v_ego_cluster=20 / 3.6))
   assert not driver.step()
   assert not driver.brake_tap()
   driver.hold(500)
