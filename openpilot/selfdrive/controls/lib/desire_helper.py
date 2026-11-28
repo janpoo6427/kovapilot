@@ -22,10 +22,13 @@ class DesireHelper:
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
   def update(self, carstate, lateral_active, lane_change_prob, alc=None):
-    # alc: KOVA AutoLaneChange (kovapilot/lateral/auto_lane_change.py); None or off keeps the stock behaviour
+    # alc: KOVA AutoLaneChange (kovapilot/lateral/auto_lane_change.py, steering.lane_change_mode); None keeps the stock
+    # behaviour
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < (LANE_CHANGE_SPEED_MIN if alc is None else alc.speed_min(LANE_CHANGE_SPEED_MIN))
+    # KOVA 0 (off): no lane change, the car keeps its lane
+    lane_change_disabled = alc is not None and alc.lane_change_disabled()
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self.lane_change_state = LaneChangeState.off
@@ -34,7 +37,8 @@ class DesireHelper:
       if alc is not None:
         alc.stopped()
     else:
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed \
+         and not lane_change_disabled:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_timer = 0.0
         # Initialize lane change direction to prevent UI alert flicker
@@ -54,15 +58,16 @@ class DesireHelper:
         if alc is not None and alc.radar_occupied(self.lane_change_direction):
           blindspot_detected = True
 
-        if not one_blinker or below_lane_change_speed:
+        if not one_blinker or below_lane_change_speed or lane_change_disabled:
           self.lane_change_state = LaneChangeState.off
           self.lane_change_direction = LaneChangeDirection.none
           self.lane_change_timer = 0.0
-        elif torque_applied and not blindspot_detected:
+        elif torque_applied and not blindspot_detected and (alc is None or alc.nudge_allowed(self.lane_change_direction)):
+          # KOVA 1 and 2: the nudge needs the same side-lane check as the automatic start
           self.lane_change_state = LaneChangeState.laneChangeStarting
           self.lane_change_timer = 0.0
           if alc is not None:
-            alc.reset()  # the driver's lane change
+            alc.nudge_started(self.lane_change_direction)
         elif alc is not None and not blindspot_detected and alc.start_allowed(self.lane_change_direction):
           self.lane_change_state = LaneChangeState.laneChangeStarting
           self.lane_change_timer = 0.0
@@ -72,7 +77,8 @@ class DesireHelper:
         self.lane_change_timer += DT_MDL
 
         if alc is not None and alc.abort_reason(self.lane_change_direction):
-          # canceled automatic lane change before crossing: AutoLaneChange steers back to the original lane
+          # canceled before crossing (side lane taken; automatic: also brake, opposite steer, disengage): AutoLaneChange
+          # steers back to the original lane
           self.lane_change_state = LaneChangeState.off
           self.lane_change_direction = LaneChangeDirection.none
           self.lane_change_timer = 0.0

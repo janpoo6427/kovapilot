@@ -28,11 +28,27 @@ LEGACY_PARAM_KEYS = {
   CRUISE_SYNC_KEY: "CruiseAcceleratorSync",
   CRUISE_SYNC_SHADOW_KEY: "CruiseAcceleratorSyncStockShadow",
 }
+LANE_CHANGE_MODE_KEY = "steering.lane_change_mode"
+# Settings replaced by a new key: when the new key has no saved value yet, the saved old value moves to it through the
+# map (other values: the new default), then the old key is dropped as a retired one. steering.auto_lane_change
+# 0 (stock nudge) / 1 (automatic) became steering.lane_change_mode 1 (on steering input) / 2 (automatic), so a saved
+# choice keeps its behaviour; 0 (off) is new.
+RENAMED_KEYS = {"steering.auto_lane_change": (LANE_CHANGE_MODE_KEY, {0: 1, 1: 2})}
 # Settings that were removed from the catalog. A saved value is ignored when read and dropped when the store is next
 # initialized or written. cruise.lead_restart_response: following a stopped lead away now follows the driving
 # personality (kovapilot/config/personality_weights.py).
-RETIRED_KEYS = frozenset({"cruise.lead_restart_response"})
+RETIRED_KEYS = frozenset({"cruise.lead_restart_response", *RENAMED_KEYS})
 CATALOG_PATH = Path(__file__).with_name("kova_params.json")
+
+
+def _migrate_renamed(values: dict[str, Any]) -> dict[str, Any]:
+  values = dict(values)
+  for old, (new, mapping) in RENAMED_KEYS.items():
+    if old in values and new not in values:
+      old_value = int(values[old]) if type(values[old]) is bool else values[old]
+      if type(old_value) is int and old_value in mapping:
+        values[new] = mapping[old_value]
+  return values
 
 
 class KovaParamsError(ValueError):
@@ -283,7 +299,7 @@ class KovaParamsStore:
     revision = state.get("revision")
     values = state.get("values")
     if isinstance(values, dict) and not RETIRED_KEYS.isdisjoint(values):
-      values = {key: value for key, value in values.items() if key not in RETIRED_KEYS}
+      values = {key: value for key, value in _migrate_renamed(values).items() if key not in RETIRED_KEYS}
       state = {**state, "values": values}
     if type(revision) is not int or revision < 0 or not isinstance(values, dict) or not set(values).issubset(self._settings):
       raise KovaParamsValidationError("stored KovaParams has an invalid revision or value set")

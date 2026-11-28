@@ -89,21 +89,20 @@
       "requiredCapabilities": ["alwaysSteering"]
     },
     {
-      "key": "steering.auto_lane_change",
+      "key": "steering.lane_change_mode",
       "dependencies": [
         {"condition": "blindSpotMonitor", "title": {"ko": "후측방 경고(BSM) 지원", "en": "Blind-spot monitor support"}}
       ],
       "groupId": "steering",
       "order": 110,
       "type": "enum",
-      "control": "switch",
-      "options": [0, 1],
-      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
-      "defaultValue": 0,
-      "title": {"ko": "자동 차선 변경", "en": "Automatic lane change"},
+      "options": [0, 1, 2],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "조향 개입 시", "en": "On steering input"}, "2": {"ko": "자동", "en": "Automatic"}},
+      "defaultValue": 1,
+      "title": {"ko": "차선 변경", "en": "Lane change"},
       "description": {
-        "ko": "크루즈(openpilot)가 켜져 있고 30 km/h 이상일 때 방향지시등을 켜고 1초 뒤 핸들을 밀지 않아도 차선을 바꿉니다. 그쪽 후측방 경고(BSM)가 1초 동안 없고 모델에 옆 차선이 보여야 하며, 방향지시등 한 번에 한 번만 자동으로 합니다. 브레이크·반대 방향 핸들·운전자 모니터링 경고 때는 하지 않고, 바꾸는 도중 BSM이 켜지거나 브레이크·반대 핸들이면 선을 넘기 전에는 원래 차선으로 돌아갑니다. BSM이 없거나 BSM 신호가 끊긴 차는 지금처럼 핸들을 밀어야 합니다. 차선 변경 중이 아닐 때 바로 적용됩니다.",
-        "en": "With cruise (openpilot) engaged at 30 km/h or more, changes lanes 1 s after you turn on the turn signal without a nudge on the wheel. The blind-spot monitor on that side must have been clear for 1 s and the model must see the lane, and it happens once per turn signal. It does not start while braking, steering the other way or with a driver monitoring warning; braking, steering the other way or a blind-spot warning during the change steers back to the original lane before crossing the line. Vehicles without a blind-spot monitor or with its signal lost still need the nudge. Applies at once outside a lane change."
+        "ko": "끔: 방향지시등을 켜고 핸들을 밀어도 openpilot이 차선을 바꾸지 않고 지금 차선을 지킵니다(차선 변경은 운전자가 직접). 조향 개입 시: 방향지시등을 켜고 그쪽으로 핸들을 밀면 바꿉니다. 자동: 크루즈(openpilot)가 켜져 있고 30 km/h 이상이면 방향지시등을 켜고 주행 성향에 따라 0.7~1.5초 뒤 핸들을 밀지 않아도 바꿉니다(방향지시등 한 번에 한 번, 브레이크·반대 방향 핸들·운전자 모니터링 경고 때는 안 함). 조향 개입 시와 자동 모두 그쪽 후측방 경고(BSM)가 1초(레이더가 없거나 레이더 오류인 차는 2초) 동안 없고 모델에 옆 차선이 보여야 하며, 레이더를 쓰는 차는 옆 차로 앞쪽에 가깝거나 다가오는 물체(서 있는 물체는 3 m 안)가 1초 동안 없어야 시작합니다. 선을 넘기 전에 BSM이 켜지거나 레이더에 물체가 잡히면 원래 차선으로 돌아갑니다(자동은 브레이크·반대 방향 핸들에도). BSM이 없는 차는 조향 개입 시와 자동 모두 지금처럼 핸들을 밀어야 하고, BSM 신호가 끊기면 시작하지 않습니다. 차선 변경 중이 아닐 때 바로 적용됩니다.",
+        "en": "Off: openpilot does not change lanes; with the turn signal on and a nudge on the wheel it keeps the lane (change lanes yourself). On steering input: turn on the turn signal and nudge the wheel that way. Automatic: with cruise (openpilot) engaged at 30 km/h or more, changes lanes 0.7-1.5 s (by driving personality) after you turn on the turn signal without a nudge, once per turn signal, not while braking, steering the other way or with a driver monitoring warning. Both start only when the blind-spot monitor on that side has been clear for 1 s (2 s on cars without radar or with a radar fault), the model sees the lane and, on cars whose radar is used, no object in that lane ahead is near or closing (standing objects: within 3 m) for 1 s. A blind-spot warning or a radar object before crossing the line steers back to the original lane (automatic: braking or steering the other way too). Vehicles without a blind-spot monitor still need the nudge in both; with its signal lost no lane change starts. Applies at once outside a lane change."
       },
       "access": "readWrite",
       "risk": "control",

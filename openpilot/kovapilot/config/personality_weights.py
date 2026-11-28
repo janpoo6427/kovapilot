@@ -7,7 +7,7 @@ from openpilot.kovapilot.config.longitudinal_personality import DEFAULT_PERSONAL
 
 P = log.LongitudinalPersonality
 
-# Automatic lane change (steering.auto_lane_change): seconds after the turn signal comes on before it may start.
+# Automatic lane change (steering.lane_change_mode 2): seconds after the turn signal comes on before it may start.
 LANE_CHANGE_START_DELAY_S = {
   P.aggressive: 0.7,
   P.standard: 1.0,

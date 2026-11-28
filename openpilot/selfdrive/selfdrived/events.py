@@ -1058,7 +1058,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.MID, VisualAlert.steerRequired, AudibleAlert.warningSoft, 2.),
   },
 
-  # KOVA automatic lane change (steering.auto_lane_change)
+  # KOVA lane change mode (steering.lane_change_mode)
   EventName.autoLaneChange: {
     ET.WARNING: auto_lane_change_alert,
   },

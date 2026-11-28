@@ -7,7 +7,8 @@ import pytest
 from openpilot.cereal import log
 from openpilot.common.realtime import DT_MDL
 from openpilot.kovapilot.lateral import auto_lane_change as alc_mod
-from openpilot.kovapilot.lateral.auto_lane_change import (RADAR_CLEAR_TIME, RADAR_HOLD_FRAMES, AutoLaneChange, AutoState,
+from openpilot.kovapilot.lateral.auto_lane_change import (BLINDSPOT_CLEAR_TIME_NO_RADAR, MODE_AUTO, MODE_NUDGE, RADAR_CLEAR_TIME,
+                                                         RADAR_HOLD_FRAMES, RADAR_STATIONARY_SPEED, AutoLaneChange, AutoState,
                                                          RadarTrackSource, lane_change_blocked_alert, radar_object_blocks,
                                                          side_radar_objects)
 from openpilot.kovapilot.tests.test_auto_lane_change import (LANE_WIDTH, car_params, model, random_world, run_sequence)
@@ -39,8 +40,8 @@ def tracks(points, **errors):
 class RadarDrive:
   """DesireHelper + AutoLaneChange at the model rate with radar points (modeld order)."""
 
-  def __init__(self, enabled=True, radar=True, bsm=True):
-    self.alc = AutoLaneChange(radar_car(bsm, radar), enabled=enabled)
+  def __init__(self, enabled=True, radar=True, bsm=True, mode=None):
+    self.alc = AutoLaneChange(radar_car(bsm, radar), enabled=enabled, mode=mode)
     self.dh = DesireHelper()
     self.cs = SimpleNamespace(vEgo=25.0, leftBlinker=False, rightBlinker=False, steeringPressed=False, steeringTorque=0.0,
                               leftBlindspot=False, rightBlindspot=False, blindspotFresh=bsm, brakePressed=False)
@@ -87,6 +88,35 @@ class RadarDrive:
 ])
 def test_block_rule(d_rel, v_rel, blocks):
   assert radar_object_blocks(d_rel, v_rel) == blocks
+
+
+@pytest.mark.parametrize("d_rel,v_rel,v_ego,blocks", [
+  (60.0, -25.0, 25.0, False),  # guard rail, tunnel wall or parked car 60 m ahead at 90 km/h: no longer blocks
+  (20.0, -25.0 + 1.9, 25.0, False),  # standing still within the measured 2 m/s
+  (20.0, -25.0 + 2.1, 25.0, True),  # 2.1 m/s over the ground: moving, closing in within 3 s still blocks
+  (2.9, -25.0, 25.0, True),  # standing still within 3 m of the front bumper
+  (0.0, -25.0, 25.0, True),  # standing still beside the car
+  (26.0, -8.4, 25.0, True),  # moving traffic as before
+  (10.0, -2.0, 25.0, False),
+])
+def test_block_rule_standing_object(d_rel, v_rel, v_ego, blocks):
+  # janpoo 2026-11-28 17:11: a side-lane object standing still blocks only within 3 m of the front bumper
+  assert RADAR_STATIONARY_SPEED == 2.0
+  assert radar_object_blocks(d_rel, v_rel, v_ego) == blocks
+
+
+@pytest.mark.parametrize("mode", [MODE_NUDGE, MODE_AUTO])
+@pytest.mark.parametrize("d_rel,starts", [(40.0, True), (2.0, False)])
+def test_standing_object_blocks_only_near(mode, d_rel, starts):
+  d = RadarDrive(mode=mode)
+  d.points = [point(7, d_rel, LEFT_LANE_Y, -d.cs.vEgo)]  # standing still in the left lane, at 25 m/s
+  d.blinker("left")
+  d.seconds(1.0)
+  if mode == MODE_NUDGE:
+    d.nudge("left")
+  d.step()
+  assert (d.dh.lane_change_state == LCS.laneChangeStarting) == starts
+  assert any(d.blocked) != starts
 
 
 def test_side_lane_position():
@@ -139,21 +169,25 @@ def test_nudge_blocked_like_blindspot(enabled):
   assert d.blocked[-1]
   d.points = []
   d.step(2)
-  assert d.dh.lane_change_state == LCS.laneChangeStarting  # nudge goes as soon as the object is gone, as with BSM
+  # 1 and 2: the side must have been clear RADAR_CLEAR_TIME before the nudge goes, as the automatic start
+  assert d.dh.lane_change_state == LCS.preLaneChange and not d.blocked[-1]
+  d.seconds(RADAR_CLEAR_TIME)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting
 
 
-def test_nudge_started_is_not_stopped():
-  # stock: the blind spot is not looked at after a nudge started; neither is the radar
+def test_nudge_started_returns_for_an_object_before_crossing():
+  # 1: a nudged lane change is watched like an automatic one: a radar object before crossing steers back
   d = RadarDrive(enabled=False)
   d.blinker("left")
-  d.seconds(0.5)
+  d.seconds(1.0)
   d.nudge("left")
   d.step()
   assert d.dh.lane_change_state == LCS.laneChangeStarting
+  d.cs.steeringPressed, d.cs.steeringTorque = False, 0.0
   d.points = [point(7, 0.0, LEFT_LANE_Y, 0.0)]
   d.lane_change_prob = 0.9
-  d.seconds(1.0)
-  assert d.dh.lane_change_state == LCS.laneChangeStarting
+  d.step(RADAR_HOLD_FRAMES)
+  assert d.dh.lane_change_state == LCS.off and d.alc.returning
 
 
 def test_object_during_auto_change_returns():
@@ -184,7 +218,7 @@ def test_single_frame_return_ignored():
 
 
 @pytest.mark.parametrize("case", ["no_radar_car", "no_message", "canError", "radarFault", "temporary"])
-def test_without_radar_data_unchanged(case):
+def test_without_radar_data_waits_two_seconds(case):
   d = RadarDrive(radar=case != "no_radar_car")
   d.points = [point(7, 0.0, LEFT_LANE_Y, 0.0)]
   if case == "no_message":
@@ -197,6 +231,9 @@ def test_without_radar_data_unchanged(case):
     d.radar_errors = {"radarUnavailableTemporary": True}
   d.blinker("left")
   d.seconds(1.1)
+  # janpoo 2026-11-28 17:18: no radar object blocks, the blind spot must have been clear 2 s
+  assert d.dh.lane_change_state == LCS.preLaneChange and d.alc.state == AutoState.waiting
+  d.seconds(BLINDSPOT_CLEAR_TIME_NO_RADAR - 1.0)
   assert d.dh.lane_change_state == LCS.laneChangeStarting
   assert not any(d.blocked)
 
@@ -217,22 +254,24 @@ def test_stale_radar_with_submaster_alive():
 
 
 @pytest.mark.parametrize("seed", range(3))
-def test_radar_car_without_objects_is_unchanged(seed):
-  # a radar car with an empty radar: decisions equal the no-radar car (and stock with the setting off)
+def test_radar_car_without_objects_is_unchanged(seed, monkeypatch):
+  # a radar car with an empty radar: decisions equal the car without radar data, but for the blind-spot wait (1 s, 2 s)
+  monkeypatch.setattr(alc_mod, "BLINDSPOT_CLEAR_TIME_NO_RADAR", alc_mod.BLINDSPOT_CLEAR_TIME)
   rows = random_world(seed)
-  stock = run_sequence(rows, None)
-  cp = radar_car(True, True)
-  dh = DesireHelper()
-  alc = AutoLaneChange(cp, enabled=False)
-  out = []
-  for cs, lat, prob, engaged, offset in rows:
-    sm = {"carState": cs, "carControl": SimpleNamespace(enabled=engaged, latActive=lat), "radarTracks": tracks([]),
-          "driverMonitoringState": SimpleNamespace(disableReason=DM.DisableReason.none, alertLevel=DM.AlertLevel.none)}
-    alc.update(sm, model(offset), dh.lane_change_state, prob)
-    dh.update(cs, lat, prob, alc)
-    out.append((dh.lane_change_state, dh.lane_change_direction, dh.desire, round(dh.lane_change_timer, 6)))
-  assert out == stock
-  assert alc.radar.available
+  for mode in (MODE_NUDGE, MODE_AUTO):
+    expected = run_sequence(rows, AutoLaneChange(car_params(True), mode=mode), check=False)
+    dh = DesireHelper()
+    alc = AutoLaneChange(radar_car(True, True), mode=mode)
+    out = []
+    for cs, lat, prob, engaged, offset in rows:
+      sm = {"carState": cs, "carControl": SimpleNamespace(enabled=engaged, latActive=lat), "radarTracks": tracks([]),
+            "driverMonitoringState": SimpleNamespace(disableReason=DM.DisableReason.none, alertLevel=DM.AlertLevel.none)}
+      alc.update(sm, model(offset), dh.lane_change_state, prob)
+      dh.update(cs, lat, prob, alc)
+      alc.publish_state(dh.lane_change_state)
+      out.append((dh.lane_change_state, dh.lane_change_direction, dh.desire, round(dh.lane_change_timer, 6)))
+    assert out == expected
+    assert alc.radar.available
 
 
 def test_alert_helper():

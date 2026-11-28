@@ -44,6 +44,9 @@ class PersonalityDrive(Drive):
       from openpilot.kovapilot.tests.test_auto_lane_change import model
       m = model(self.offset)
       sm = {"carState": self.cs, "carControl": self.cc, "driverMonitoringState": self.dm}
+      if self.radar:
+        from openpilot.kovapilot.tests.test_auto_lane_change import no_tracks
+        sm["radarTracks"] = no_tracks()
       if self.personality is not None:
         sm["selfdriveState"] = SimpleNamespace(personality=self.personality)
         sm = SubMasterLike(sm, self.seen)
@@ -95,6 +98,9 @@ def test_safety_waits_do_not_follow_personality():
   assert starts == pytest.approx([3.0] * 4, abs=DT_MDL)
   # aggressive right after the drive starts: the 1 s blind-spot clear time still holds, not 0.7 s
   assert start_time(PersonalityDrive(P.aggressive)) == pytest.approx(1.0, abs=DT_MDL)
+  # without radar data the blind spot must have been clear 2 s, for every personality
+  assert alc_mod.BLINDSPOT_CLEAR_TIME_NO_RADAR == 2.0
+  assert [start_time(PersonalityDrive(p, radar=False)) for p in PERSONALITIES] == pytest.approx([2.0] * 4, abs=DT_MDL)
 
 
 def _lead(time_s, distance=6.0, speed=0.0, track_id=3):
@@ -254,24 +260,24 @@ class MemoryBackend:
 def test_lead_restart_setting_is_gone_and_old_value_ignored():
   assert OLD_KEY not in {s["key"] for s in load_bundled_catalog()["settings"]}
   assert not hasattr(kova_params, "LEAD_RESTART_KEY")
-  backend = MemoryBackend({"schemaVersion": 1, "revision": 4, "values": {OLD_KEY: 2, "steering.auto_lane_change": 1}})
+  backend = MemoryBackend({"schemaVersion": 1, "revision": 4, "values": {OLD_KEY: 2, "steering.lane_change_mode": 1}})
   store = KovaParamsStore(backend)
   values = store.values()
-  assert OLD_KEY not in values and values["steering.auto_lane_change"] == 1
+  assert OLD_KEY not in values and values["steering.lane_change_mode"] == 1
   assert OLD_KEY not in {s["key"] for s in store.document()["settings"]}
   store.initialize_storage()
   assert OLD_KEY not in backend.value["values"]
-  assert backend.value["revision"] == 4 and backend.value["values"]["steering.auto_lane_change"] == 1
+  assert backend.value["revision"] == 4 and backend.value["values"]["steering.lane_change_mode"] == 1
   puts = backend.puts
   store.initialize_storage()
   assert backend.puts == puts
-  store.update("steering.auto_lane_change", 0, 4, is_offroad=True)
+  store.update("steering.lane_change_mode", 0, 4, is_offroad=True)
   assert backend.value["revision"] == 5 and OLD_KEY not in backend.value["values"]
 
 
 def test_old_value_dropped_on_next_save_without_initialize():
   backend = MemoryBackend({"schemaVersion": 1, "revision": 0, "values": {OLD_KEY: 3}})
   store = KovaParamsStore(backend)
-  store.update("steering.auto_lane_change", 1, 0, is_offroad=True)
+  store.update("steering.lane_change_mode", 1, 0, is_offroad=True)
   assert OLD_KEY not in backend.value["values"]
-  assert backend.value["values"]["steering.auto_lane_change"] == 1
+  assert backend.value["values"]["steering.lane_change_mode"] == 1

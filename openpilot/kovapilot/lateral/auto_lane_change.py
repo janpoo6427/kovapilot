@@ -1,29 +1,37 @@
-"""KOVA auto lane change (steering.auto_lane_change).
+"""KOVA lane change mode (steering.lane_change_mode): 0 off, 1 on steering input (nudge), 2 automatic.
 
-Off (the default) leaves the stock openpilot DesireHelper exactly as it is: the driver turns on a blinker and nudges
-the wheel. On, a lane change also starts without the nudge a start delay after the driver turns on one blinker (by driving
-personality, kovapilot/config/personality_weights.py LANE_CHANGE_START_DELAY_S: 0.7 / 1.0 / 1.3 / 1.5 s for distance
-levels 1-4, standard 1.0 s; the blind-spot and model lane checks below do not follow the personality) when
+0 (off): openpilot does not change lanes: a turn signal does not start the stock lane change, the car
+keeps its lane and the driver changes lanes by hand.
+
+1 (on steering input) and 2 (automatic) start a lane change only when the side lane is clear by every side-lane source
+(side_lane_clear): the car blind-spot monitor is present, its frame is fresh and that side has been clear for
+BLINDSPOT_CLEAR_TIME (BLINDSPOT_CLEAR_TIME_NO_RADAR without radar data), the model has seen a lane there for
+SIDE_LANE_HOLD, and on cars whose radar is used
+(CarParams.radarUnavailable False) the radar has seen no object in that lane near or closing (RadarTrackSource) for
+RADAR_CLEAR_TIME. 1 starts when the driver nudges the wheel that way, as stock openpilot. 2 also starts without the nudge
+a start delay after the driver turns on one blinker (by driving personality, kovapilot/config/personality_weights.py
+LANE_CHANGE_START_DELAY_S: 0.7 / 1.0 / 1.3 / 1.5 s for distance levels 1-4, standard 1.0 s; the side-lane checks do not
+follow the personality) when
 
   * openpilot is engaged (cruise; not always-on steering alone),
   * the speed is at least AUTO_LANE_CHANGE_MIN_SPEED,
-  * the side lane is clear by every side-lane source (side_lane_clear): the car's blind-spot monitor is present, its
-    frame is fresh and that side has been clear for BLINDSPOT_CLEAR_TIME, and the model has seen a lane there for
-    SIDE_LANE_HOLD, and on cars whose radar is used (CarParams.radarUnavailable False) the radar has seen no object in
-    that lane near or closing (RadarTrackSource) for RADAR_CLEAR_TIME,
+  * the side lane is clear (above),
   * driver monitoring is off, or on and not warning,
   * the driver has not braked or steered the other way since the blinker came on, and this blinker has not already
     started an automatic lane change (one automatic lane change per blinker).
 
-Cars without a blind-spot monitor, or whose blind-spot frame stops, keep the nudge only. During an automatic lane
-change, a blind-spot warning or a radar object on the target side, braking, steering the other way, disengaging or a
-stale blind-spot frame cancels it: before the car has crossed into the new lane it steers back to the centre of the
-original lane (return_curvature); once it has crossed, the lane change is left to finish in the new lane.
+Vehicles without a blind-spot monitor keep the stock nudge in 1 and 2 (a radar object still blocks it, below). Before the
+car has crossed into the new lane, a blind-spot warning or a radar object on the target side cancels a lane change started
+either way and steers back to the centre of the original lane (return_curvature); an automatic one is also canceled by
+braking, steering the other way, disengaging or a stale blind-spot frame. Once it has crossed, the lane change is left to
+finish in the new lane.
 
-The radar object also blocks the driver's nudge exactly as a blind-spot warning does in stock openpilot (DesireHelper
-stays in preLaneChange, selfdrived shows the stock laneChangeBlocked alert through modelV2.meta.kovaLaneChangeBlocked),
-whether or not the automatic lane change setting is on. Cars without radar tracks keep everything as before. The front
-radar sees the side lane ahead of and beside the front of the car only; behind it is the blind-spot monitor's.
+A radar object blocks the nudge exactly as a blind-spot warning does in stock openpilot (DesireHelper stays in
+preLaneChange, selfdrived shows the stock laneChangeBlocked alert through modelV2.meta.kovaLaneChangeBlocked) on every car
+whose radar is used. An object standing still (RADAR_STATIONARY_SPEED: guard rails, tunnel walls, parked cars) blocks only
+while it is within RADAR_NEAR_DIST of the front bumper; moving objects also while closing in. Cars without radar tracks, or
+with stale or faulted radar data, use the other sources only. The front radar sees the side lane ahead of and beside the
+front of the car only; behind it is the blind-spot monitor.
 """
 from dataclasses import dataclass
 
@@ -34,7 +42,9 @@ from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.kovapilot.config.personality_weights import LANE_CHANGE_START_DELAY_S, personality_value
 
-AUTO_LANE_CHANGE_KEY = "steering.auto_lane_change"
+LANE_CHANGE_MODE_KEY = "steering.lane_change_mode"
+MODE_OFF, MODE_NUDGE, MODE_AUTO = 0, 1, 2
+MODE_DEFAULT = MODE_NUDGE  # the catalog default, also when the store cannot be read
 AutoState = log.KovaAutoLaneChange
 LaneChangeDirection = log.LaneChangeDirection
 LaneChangeState = log.LaneChangeState
@@ -42,6 +52,9 @@ DmDisableReason = log.DriverMonitoringState.DisableReason
 
 AUTO_LANE_CHANGE_MIN_SPEED = 30 * CV.KPH_TO_MS  # one constant, to be tuned after car tests
 BLINDSPOT_CLEAR_TIME = 1.0  # s the blind spot must have been clear
+# without radar data (CarParams.radarUnavailable, or stale or faulted radar tracks) nothing sees a car that has just left
+# the blind spot ahead of the mirror, so the blind spot must have been clear longer
+BLINDSPOT_CLEAR_TIME_NO_RADAR = 2.0  # s
 SIDE_LANE_MIN_WIDTH = 2.5  # m from the current lane line to the next line and to the road edge
 SIDE_LANE_HOLD = 0.2  # s
 SIDE_LANE_LOOKAHEAD = 1.0  # s ahead
@@ -58,7 +71,13 @@ RADAR_LANE_WIDTH_MIN, RADAR_LANE_WIDTH_MAX = 2.5, 4.5  # m, clip of the current 
 RADAR_NEAR_DIST = 3.0  # m from the front bumper to the object rear (0 = beside the car)
 RADAR_HORIZON = 3.0  # s: blocks when nearer than RADAR_NEAR_DIST now or, at its relative speed, within this time
 RADAR_HOLD_FRAMES = 3  # model frames (0.15 s) one track must keep blocking before it counts
-RADAR_CLEAR_TIME = 1.0  # s the side must have been clear of radar objects before an automatic start, as the blind spot
+RADAR_CLEAR_TIME = 1.0  # s the side must have been clear of radar objects before a start, as the blind spot
+# A side-lane object standing still (speed over the ground |vEgo + vRel| below this) blocks only within RADAR_NEAR_DIST,
+# not for closing in within RADAR_HORIZON: at 100 km/h that reaches 86 m ahead, guard rails, tunnel walls and parked cars
+# included. 2026-11-28 IONIQ 9 drives (108 worker rlogs, side-lane tracks seen 10 frames or more): the track medians of
+# |vEgo + vRel| reach 1.8 m/s on the impossible negative side (going backwards), so objects that stand still read up
+# to about 2 m/s; these drives stay below 80 km/h.
+RADAR_STATIONARY_SPEED = 2.0  # m/s
 
 # Going back to the original lane
 CROSSED_JUMP = 1.5  # m: the current-lane centre jumps by about a lane width when the model relabels the lines
@@ -80,13 +99,14 @@ def auto_lane_change_supported(CP) -> bool:
   return bool(CP.flags & HyundaiFlags.HAS_BSM)
 
 
-def read_auto_lane_change(params) -> bool:
-  """Display and runtime reader: never raises, a missing or broken store means off."""
+def read_lane_change_mode(params) -> int:
+  """Display and runtime reader: never raises, a missing or broken store means MODE_DEFAULT."""
   try:
     from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
-    return KovaParamsStore(ParamsKovaParamsBackend(params)).values()[AUTO_LANE_CHANGE_KEY] == 1
+    value = KovaParamsStore(ParamsKovaParamsBackend(params)).values()[LANE_CHANGE_MODE_KEY]
+    return value if type(value) is int and value in (MODE_OFF, MODE_NUDGE, MODE_AUTO) else MODE_DEFAULT
   except Exception:
-    return False
+    return MODE_DEFAULT
 
 
 def current_personality(sm):
@@ -120,6 +140,7 @@ class BlindSpotSource:
   def __init__(self, supported: bool):
     self.supported = supported
     self.clear_frames = [0, 0]
+    self.clear_time = BLINDSPOT_CLEAR_TIME  # AutoLaneChange sets it from the radar (blindspot_clear_time)
 
   def update(self, CS) -> None:
     fresh = self.supported and CS.blindspotFresh
@@ -130,7 +151,13 @@ class BlindSpotSource:
     if not (self.supported and CS.blindspotFresh):
       return SideReport(self.name, False)
     occupied = (CS.leftBlindspot, CS.rightBlindspot)[side]
-    return SideReport(self.name, True, occupied, not occupied and self.clear_frames[side] * DT_MDL >= BLINDSPOT_CLEAR_TIME)
+    return SideReport(self.name, True, occupied, not occupied and self.clear_frames[side] * DT_MDL >= self.clear_time)
+
+
+def blindspot_clear_time(radar_available: bool) -> float:
+  """How long the blind spot must have been clear: BLINDSPOT_CLEAR_TIME with radar data, BLINDSPOT_CLEAR_TIME_NO_RADAR
+  without (no radar tracks, or stale or faulted). Runs at the same time as the start delay after the turn signal."""
+  return BLINDSPOT_CLEAR_TIME if radar_available else BLINDSPOT_CLEAR_TIME_NO_RADAR
 
 
 def side_lane_width(model, side: int, v_ego: float) -> tuple[float, float, float]:
@@ -209,14 +236,32 @@ def side_radar_objects(points, model, side: int) -> list[tuple[int, float, float
   return objects
 
 
-def radar_object_blocks(d_rel: float, v_rel: float) -> bool:
-  """Nearer than RADAR_NEAR_DIST now, or at this relative speed within RADAR_HORIZON (time to RADAR_NEAR_DIST)."""
-  return d_rel < RADAR_NEAR_DIST or (v_rel < 0.0 and d_rel + v_rel * RADAR_HORIZON < RADAR_NEAR_DIST)
+def radar_object_stationary(v_rel: float, v_ego: float) -> bool:
+  """The object speed over the ground (vEgo + vRel) is below RADAR_STATIONARY_SPEED."""
+  return abs(v_ego + v_rel) < RADAR_STATIONARY_SPEED
+
+
+def radar_object_blocks(d_rel: float, v_rel: float, v_ego: float | None = None) -> bool:
+  """Nearer than RADAR_NEAR_DIST now, or, unless it stands still (radar_object_stationary), at this relative speed
+  within RADAR_HORIZON (time to RADAR_NEAR_DIST). Without v_ego every object counts as moving."""
+  if d_rel < RADAR_NEAR_DIST:
+    return True
+  if v_ego is not None and radar_object_stationary(v_rel, v_ego):
+    return False
+  return v_rel < 0.0 and d_rel + v_rel * RADAR_HORIZON < RADAR_NEAR_DIST
+
+
+def _v_ego(sm) -> float | None:
+  try:
+    return float(sm["carState"].vEgo)
+  except (KeyError, AttributeError, TypeError, ValueError):
+    return None
 
 
 class RadarTrackSource:
   """Side-lane objects from the car radar (radarTracks) on cars whose radar is used. A side is occupied while one track
-  in that lane has been near or closing (radar_object_blocks) for RADAR_HOLD_FRAMES; ready once it has been clear for
+  in that lane has been near or closing (radar_object_blocks; near only when it stands still) for RADAR_HOLD_FRAMES;
+  ready once it has been clear for
   RADAR_CLEAR_TIME. Without radar, or with stale or faulted radar data, it has no data and changes no decision."""
   name = "radar_tracks"
 
@@ -230,11 +275,12 @@ class RadarTrackSource:
   def update(self, sm, model=None) -> None:
     points = radar_points(sm) if self.has_radar and model is not None else None
     self.available = points is not None
+    v_ego = _v_ego(sm) if points is not None else None
     for side in (0, 1):
       hold = {}
       if points is not None:
         for track_id, d_rel, v_rel, _ in side_radar_objects(points, model, side):
-          if radar_object_blocks(d_rel, v_rel):
+          if radar_object_blocks(d_rel, v_rel, v_ego):
             hold[track_id] = self.hold[side].get(track_id, 0) + 1
       self.hold[side] = hold
       self.occupied[side] = any(frames >= RADAR_HOLD_FRAMES for frames in hold.values())
@@ -294,12 +340,19 @@ def return_curvature(model, v_ego: float) -> float | None:
 class AutoLaneChange:
   """State for DesireHelper. update() once per model frame before DesireHelper.update()."""
 
-  def __init__(self, CP, params=None, enabled: bool | None = None):
+  def __init__(self, CP, params=None, enabled: bool | None = None, mode: int | None = None):
+    # mode fixes the setting (tests, replays); enabled is the old on / off: on = MODE_AUTO, off = MODE_NUDGE
+    if mode is None and enabled is not None:
+      mode = MODE_AUTO if enabled else MODE_NUDGE
     self.params = params
     self.supported = auto_lane_change_supported(CP)
-    self.fixed = enabled
-    self.setting = bool(enabled) if enabled is not None else False
-    self.enabled = self.supported and self.setting
+    self.fixed = mode
+    if mode is not None:
+      self.setting = mode
+    else:
+      self.setting = read_lane_change_mode(params) if params is not None else MODE_DEFAULT
+    self.mode = self.setting
+    self.enabled = self.supported and self.mode == MODE_AUTO  # automatic start without the nudge
     self.poll_frame = 0
     self.blindspot = BlindSpotSource(self.supported)
     self.model_lane = ModelLaneSource()
@@ -317,6 +370,7 @@ class AutoLaneChange:
     self.reason = ""
     # the automatic lane change in progress
     self.active_dir = LaneChangeDirection.none
+    self.active_auto = False  # started automatically (False: by the nudge)
     self.crossed = False
     self.prev_offset = None
     self.returning = False
@@ -332,9 +386,10 @@ class AutoLaneChange:
     self.poll_frame += 1
     if self.poll_frame >= SETTING_POLL_FRAMES:
       self.poll_frame = 0
-      self.setting = read_auto_lane_change(self.params)
+      self.setting = read_lane_change_mode(self.params)
     if lane_change_off:  # a change applies outside a lane change
-      self.enabled = self.supported and self.setting
+      self.mode = self.setting
+      self.enabled = self.supported and self.mode == MODE_AUTO
 
   def update(self, sm, model, lane_change_state, lane_change_prob: float = 0.0) -> None:
     CS = sm["carState"]
@@ -353,6 +408,7 @@ class AutoLaneChange:
         source.update(model, CS.vEgo)
       else:
         source.update(sm, model)
+    self.blindspot.clear_time = blindspot_clear_time(self.radar.available)
 
     one_blinker = CS.leftBlinker != CS.rightBlinker
     direction = (LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right) if one_blinker else LaneChangeDirection.none
@@ -379,6 +435,33 @@ class AutoLaneChange:
     return [source.report(self.CS, side) for source in self.sources]
 
   # ---- DesireHelper hooks
+  def lane_change_disabled(self) -> bool:
+    """0 off: DesireHelper does not start the stock lane change, the car keeps its lane."""
+    return self.mode == MODE_OFF
+
+  def judged(self) -> bool:
+    """1 and 2 on cars with a blind-spot monitor: every start, the nudge included, needs side_lane_clear."""
+    return self.supported and self.mode in (MODE_NUDGE, MODE_AUTO)
+
+  def side_reason(self, direction) -> str:
+    """Why the side lane does not allow a start ('' = clear by every source)."""
+    clear, reason = side_lane_clear(self.reports(direction))
+    return "" if clear else reason
+
+  def nudge_allowed(self, direction) -> bool:
+    """The nudge: in 1 and 2 the same side-lane check as the automatic start; stock without a blind-spot monitor."""
+    if not self.judged():
+      return True
+    self.reason = self.side_reason(direction)
+    return self.reason == ""
+
+  def nudge_started(self, direction) -> None:
+    """A lane change started by the nudge: no automatic one in progress; in 1 and 2 it is watched for the side lane."""
+    self.reset()
+    if self.judged():
+      self.active_dir = direction
+      self.active_auto = False
+
   def radar_occupied(self, direction) -> bool:
     """The radar sees an object in the lane on that side: blocks the start like a blind-spot warning, nudge included."""
     return direction != LaneChangeDirection.none and self.radar.available and self.radar.occupied[_side(direction)]
@@ -421,12 +504,20 @@ class AutoLaneChange:
   def started(self, direction, model=None) -> None:
     self.used = True
     self.active_dir = direction
+    self.active_auto = True
     self.crossed = False
     self.prev_offset = None
 
   def abort_reason(self, direction) -> str:
-    """Why an automatic lane change in progress must stop ('' = keep going)."""
+    """Why a lane change in progress must stop before crossing ('' = keep going). Started by the nudge: a blind-spot
+    warning or a radar object on that side only; started automatically: also disengaging, braking, steering the other
+    way or a stale blind-spot frame."""
     if self.active_dir == LaneChangeDirection.none or self.crossed:
+      return ""
+    if not self.active_auto:
+      for report in self.reports(direction):
+        if report.available and report.occupied:
+          return report.source
       return ""
     CS = self.CS
     if not self.engaged:
@@ -449,13 +540,15 @@ class AutoLaneChange:
 
   def stopped(self) -> None:
     """DesireHelper dropped the lane change (lateral control paused or off, time limit): an automatic lane change
-    that has not crossed goes back to the original lane once lateral control runs again."""
-    if self.active_dir != LaneChangeDirection.none and not self.crossed:
+    that has not crossed goes back to the original lane once lateral control runs again (one started by the nudge
+    does not)."""
+    if self.active_dir != LaneChangeDirection.none and not self.crossed and self.active_auto:
       self.begin_return()
     self.finished()
 
   def finished(self) -> None:
     self.active_dir = LaneChangeDirection.none
+    self.active_auto = False
     self.crossed = False
     self.prev_offset = None
 
@@ -495,11 +588,16 @@ class AutoLaneChange:
   def display_state(self, lane_change_state):
     if self.returning:
       return AutoState.returning
-    if lane_change_state != LaneChangeState.preLaneChange or not self.enabled:
+    if lane_change_state != LaneChangeState.preLaneChange:
       return AutoState.none
-    reason = self.block_reason(self.blinker_dir)
-    if reason in ("", "delay"):
-      return AutoState.pending
-    if reason in (BlindSpotSource.name + "_wait", ModelLaneSource.name + "_wait", RadarTrackSource.name + "_wait"):
+    waits = (BlindSpotSource.name + "_wait", ModelLaneSource.name + "_wait", RadarTrackSource.name + "_wait")
+    if self.enabled:
+      reason = self.block_reason(self.blinker_dir)
+      if reason in ("", "delay"):
+        return AutoState.pending
+      if reason in waits:
+        return AutoState.waiting
+    # 1 and 2: the nudge waits for the side lane as well (an object there shows the stock laneChangeBlocked instead)
+    if self.judged() and self.side_reason(self.blinker_dir) in (*waits, "no_blindspot"):
       return AutoState.waiting
     return AutoState.none

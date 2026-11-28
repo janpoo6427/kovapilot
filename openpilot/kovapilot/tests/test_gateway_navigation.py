@@ -60,14 +60,19 @@ def test_auto_lane_change_state_in_this_build_and_with_the_automatic_lane_change
   model.modelV2.meta.laneChangeDirection = "left"
   car = messaging.new_message("carState")
   car.carState.leftBlindspot = True
-  state = auto_lane_change_fields(model.modelV2, car.carState, 1)["autoLaneChange"]
+  state = auto_lane_change_fields(model.modelV2, car.carState, 2)["autoLaneChange"]
   assert state["setting"] == "on" and state["laneChange"] == "preLaneChange" and state["direction"] == "left"
+  assert state["mode"] == "auto"
   assert state["blindSpotLeft"] is True and state["blindSpotRight"] is False
   assert state["auto"] == "none" and state["blindSpotFresh"] is False
   model.modelV2.meta.kovaAutoLaneChange = "pending"
   car.carState.blindspotFresh = True
-  state = auto_lane_change_fields(model.modelV2, car.carState, 1)["autoLaneChange"]
+  state = auto_lane_change_fields(model.modelV2, car.carState, 2)["autoLaneChange"]
   assert (state["auto"], state["blindSpotFresh"]) == ("pending", True)
+  # 1 (on steering input): the old on / off field says off, the mode says nudge
+  modes = [auto_lane_change_fields(model.modelV2, car.carState, v)["autoLaneChange"]["mode"] for v in (0, 1, 2)]
+  assert modes == ["off", "nudge", "auto"]
+  assert auto_lane_change_fields(model.modelV2, car.carState, 1)["autoLaneChange"]["setting"] == "off"
   # fields a build does not have are "unknown" / None, never invented
   state = auto_lane_change_fields(SimpleNamespace(meta=SimpleNamespace(laneChangeState="off", laneChangeDirection="none")),
                                   SimpleNamespace(leftBlindspot=False, rightBlindspot=False), 1)["autoLaneChange"]
@@ -75,10 +80,10 @@ def test_auto_lane_change_state_in_this_build_and_with_the_automatic_lane_change
   meta = SimpleNamespace(laneChangeState="laneChangeStarting", laneChangeDirection="right", kovaAutoLaneChange="returning")
   car_state = SimpleNamespace(leftBlindspot=False, rightBlindspot=True, blindspotFresh=True)
   state = auto_lane_change_fields(SimpleNamespace(meta=meta), car_state, 0)["autoLaneChange"]
-  assert state == {"setting": "off", "laneChange": "laneChangeStarting", "direction": "right", "auto": "returning",
+  assert state == {"setting": "off", "mode": "off", "laneChange": "laneChangeStarting", "direction": "right", "auto": "returning",
                    "blindSpotFresh": True, "blindSpotLeft": False, "blindSpotRight": True}
   assert auto_lane_change_fields(None, None, None)["autoLaneChange"] == {
-    "setting": "unknown", "laneChange": "unknown", "direction": "none", "auto": "unknown"}
+    "setting": "unknown", "mode": "unknown", "laneChange": "unknown", "direction": "none", "auto": "unknown"}
   assert auto_lane_change_fields(SimpleNamespace(), None, 1)["autoLaneChange"]["laneChange"] == "unknown"
 
 

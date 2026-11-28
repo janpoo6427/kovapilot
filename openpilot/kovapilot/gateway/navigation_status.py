@@ -17,7 +17,10 @@ _MANEUVERS = {
   **dict.fromkeys((51, 52, 53, 54, 55), "straight"),
 }
 NAVIGATION_FRESH_NS = 1_000_000_000  # navcamd publishes kovaNavigation at 5 Hz
-SETTING_KEY = "steering.auto_lane_change"
+SETTING_KEY = "steering.lane_change_mode"
+# setting: the old on / off field for apps before the three modes (on = automatic); mode: the setting itself
+LEGACY_SETTING = {2: "on", 1: "off", 0: "off"}
+MODES = {0: "off", 1: "nudge", 2: "auto"}
 SETTING_REFRESH_NS = 1_000_000_000
 LANE_CHANGE_STATES = ("off", "preLaneChange", "laneChangeStarting", "laneChangeFinishing")
 AUTO_STATES = ("none", "pending", "waiting", "returning")
@@ -76,7 +79,7 @@ def _optional(reader, name: str):
 def auto_lane_change_fields(model, car, setting: int | None) -> dict:
   """autoLaneChange: the setting, the lane change and the blind-spot state, "unknown" where this build has none."""
   try:
-    state = {"setting": {1: "on", 0: "off"}.get(setting, "unknown")}
+    state = {"setting": LEGACY_SETTING.get(setting, "unknown"), "mode": MODES.get(setting, "unknown")}
     if model is not None:
       meta = model.meta
       lane = str(meta.laneChangeState)
@@ -93,11 +96,12 @@ def auto_lane_change_fields(model, car, setting: int | None) -> dict:
       state["blindSpotLeft"], state["blindSpotRight"] = bool(car.leftBlindspot), bool(car.rightBlindspot)
     return {"autoLaneChange": state}
   except (AttributeError, TypeError, ValueError):
-    return {"autoLaneChange": {"setting": "unknown", "laneChange": "unknown", "direction": "none", "auto": "unknown"}}
+    return {"autoLaneChange": {"setting": "unknown", "mode": "unknown", "laneChange": "unknown", "direction": "none",
+                               "auto": "unknown"}}
 
 
 class AutoLaneChangeSetting:
-  """The saved steering.auto_lane_change value, read at most once a second; None when this build has no such setting."""
+  """The saved steering.lane_change_mode value, read at most once a second; None when this build has no such setting."""
 
   def __init__(self, read=None, clock=time.monotonic_ns):
     self.read, self.clock = read or _read_setting, clock
@@ -119,4 +123,4 @@ def _read_setting() -> int | None:
   from openpilot.common.params import Params
   from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
   value = KovaParamsStore(ParamsKovaParamsBackend(Params())).values().get(SETTING_KEY)
-  return value if value in (0, 1) else None
+  return value if type(value) is int and value in MODES else None

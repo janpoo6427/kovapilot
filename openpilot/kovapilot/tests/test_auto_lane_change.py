@@ -1,4 +1,4 @@
-"""KOVA automatic lane change (steering.auto_lane_change) and navigation turn signal (navigation.auto_blinker)."""
+"""KOVA lane change mode (steering.lane_change_mode) and navigation turn signal (navigation.auto_blinker)."""
 import json
 import random
 from types import SimpleNamespace
@@ -11,7 +11,8 @@ from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.kovapilot.lateral import auto_lane_change as alc_mod
-from openpilot.kovapilot.lateral.auto_lane_change import (AUTO_LANE_CHANGE_MIN_SPEED, AutoLaneChange, AutoState, BlindSpotSource,
+from openpilot.kovapilot.lateral.auto_lane_change import (AUTO_LANE_CHANGE_MIN_SPEED, BLINDSPOT_CLEAR_TIME, BLINDSPOT_CLEAR_TIME_NO_RADAR,
+                                                         MODE_AUTO, MODE_NUDGE, MODE_OFF, AutoLaneChange, AutoState, BlindSpotSource,
                                                          ModelLaneSource, RadarTrackSource, SideReport, lane_centre_offset,
                                                          return_curvature, side_lane_clear)
 from openpilot.kovapilot.navigation.nav_blinker import LEFT, RIGHT, NavBlinker, nav_blinker_output_supported, parse_guidance, start_distance
@@ -24,8 +25,15 @@ LANE_WIDTH = 3.6
 X = np.linspace(0.0, 100.0, 33)
 
 
-def car_params(bsm=True, brand="hyundai"):
-  return SimpleNamespace(brand=brand, passive=False, dashcamOnly=False, notCar=False, flags=HyundaiFlags.HAS_BSM.value if bsm else 0)
+def car_params(bsm=True, brand="hyundai", radar=False):
+  return SimpleNamespace(brand=brand, passive=False, dashcamOnly=False, notCar=False, flags=HyundaiFlags.HAS_BSM.value if bsm else 0,
+                         radarUnavailable=not radar)
+
+
+def no_tracks():
+  # radarTracks with no points and no error
+  return SimpleNamespace(points=[], errors=SimpleNamespace(canError=False, radarFault=False, wrongConfig=False,
+                                                           radarUnavailableTemporary=False))
 
 
 def lane(y):
@@ -43,8 +51,12 @@ def model(offset=0.0, left_lane=True, right_lane=True):
 class Drive:
   """DesireHelper + AutoLaneChange at the model rate with a simple lane-change world."""
 
-  def __init__(self, enabled=True, bsm=True, cp=None, sources=None):
-    self.alc = AutoLaneChange(cp or car_params(bsm), enabled=enabled)
+  def __init__(self, enabled=True, bsm=True, cp=None, sources=None, mode=None, radar=True):
+    # radar: a car whose radar is used, with no radar objects (the blind spot must have been clear 1 s); False: a car
+    # without radar data (2 s)
+    self.radar = radar
+    self.left_lane = True
+    self.alc = AutoLaneChange(cp or car_params(bsm, radar=radar), enabled=enabled, mode=mode)
     if sources is not None:
       self.alc.sources = sources
     self.dh = DesireHelper()
@@ -58,8 +70,10 @@ class Drive:
 
   def step(self, n=1):
     for _ in range(n):
-      m = model(self.offset)
+      m = model(self.offset, left_lane=self.left_lane)
       sm = {"carState": self.cs, "carControl": self.cc, "driverMonitoringState": self.dm}
+      if self.radar:
+        sm["radarTracks"] = no_tracks()
       self.alc.update(sm, m, self.dh.lane_change_state, self.lane_change_prob)
       self.dh.update(self.cs, self.cc.latActive, self.lane_change_prob, self.alc)
       self.alc.publish_state(self.dh.lane_change_state)
@@ -88,15 +102,53 @@ def test_starts_one_second_after_blinker():
   assert start * DT_MDL == pytest.approx(1.0, abs=DT_MDL)
 
 
-def test_off_is_stock():
-  d = Drive(enabled=False)
+def test_nudge_mode_needs_the_nudge():
+  # 1 (on steering input): no automatic start; the nudge starts once the side lane is clear
+  d = Drive(mode=MODE_NUDGE)
   d.blinker("left")
   d.seconds(3.0)
   assert d.dh.lane_change_state == LCS.preLaneChange
-  assert all(s[2] == AutoState.none for s in d.states)
+  assert all(s[2] in (AutoState.none, AutoState.waiting) for s in d.states) and d.states[-1][2] == AutoState.none
   d.cs.steeringPressed, d.cs.steeringTorque = True, 1.0
   d.step()
   assert d.dh.lane_change_state == LCS.laneChangeStarting
+
+
+@pytest.mark.parametrize("bsm", [True, False])
+def test_off_mode_keeps_the_lane(bsm):
+  # 0 (off): openpilot does not change lanes; turn signal and nudge keep the lane (janpoo 2026-11-28 17:15)
+  d = Drive(mode=MODE_OFF, bsm=bsm)
+  d.blinker("left")
+  d.seconds(2.0)
+  d.cs.steeringPressed, d.cs.steeringTorque = True, 1.0
+  d.seconds(3.0)
+  assert all(s[0] == LCS.off and s[1] == LCD.none and s[2] == AutoState.none for s in d.states)
+  assert d.dh.desire == log.Desire.none
+
+
+def test_nudge_mode_side_lane_check_and_return():
+  # 1: the nudge needs the same side-lane check as the automatic start (here the left lane is not seen); before crossing
+  # a blind-spot warning steers back as in 2, braking does not
+  d = Drive(mode=MODE_NUDGE)
+  d.left_lane = False
+  d.seconds(1.0)
+  d.blinker("left")
+  d.cs.steeringPressed, d.cs.steeringTorque = True, 1.0
+  d.seconds(2.0)
+  assert d.dh.lane_change_state == LCS.preLaneChange and d.alc.state == AutoState.waiting
+  d.left_lane = True
+  d.seconds(0.3)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting
+  d.cs.steeringPressed, d.cs.steeringTorque = False, 0.0
+  d.lane_change_prob = 0.9
+  d.offset = -0.8
+  d.cs.brakePressed = True
+  d.step(2)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting
+  d.cs.brakePressed = False
+  d.cs.leftBlindspot = True
+  d.step()
+  assert d.dh.lane_change_state == LCS.off and d.alc.returning
 
 
 def test_cruise_off_never_automatic():
@@ -124,18 +176,18 @@ def test_min_speed_constant():
   assert AUTO_LANE_CHANGE_MIN_SPEED == pytest.approx(30 / 3.6)
 
 
-@pytest.mark.parametrize("bsm,fresh", [(False, False), (True, False)])
-def test_no_or_stale_blindspot_nudge_only(bsm, fresh):
-  # decisions 3 and 6: no blind-spot monitor, or its frame stopped: nudge only
+@pytest.mark.parametrize("bsm,fresh,nudge_starts", [(False, False, True), (True, False, False)])
+def test_no_or_stale_blindspot_nudge_only(bsm, fresh, nudge_starts):
+  # decision 3: no blind-spot monitor: nudge only; decision 6: its frame stopped: in 1 and 2 not even the nudge starts
   d = Drive(bsm=bsm)
   d.cs.blindspotFresh = fresh
   d.blinker("left")
   d.seconds(3.0)
   assert d.dh.lane_change_state == LCS.preLaneChange
-  assert d.alc.state == AutoState.none
+  assert d.alc.state == (AutoState.none if nudge_starts else AutoState.waiting)
   d.cs.steeringPressed, d.cs.steeringTorque = True, 1.0
   d.step()
-  assert d.dh.lane_change_state == LCS.laneChangeStarting
+  assert (d.dh.lane_change_state == LCS.laneChangeStarting) == nudge_starts
 
 
 def test_blindspot_blocks_then_waits_one_second():
@@ -150,6 +202,45 @@ def test_blindspot_blocks_then_waits_one_second():
   assert d.alc.state == AutoState.waiting
   d.seconds(0.2)
   assert d.dh.lane_change_state == LCS.laneChangeStarting
+
+
+def test_no_radar_blindspot_waits_two_seconds():
+  # cars without radar data (janpoo 2026-11-28 17:18): the blind spot must have been clear 2 s, not 1 s
+  assert (BLINDSPOT_CLEAR_TIME, BLINDSPOT_CLEAR_TIME_NO_RADAR) == (1.0, 2.0)
+  d = Drive(radar=False)
+  d.cs.leftBlindspot = True
+  d.blinker("left")
+  d.seconds(2.0)
+  d.cs.leftBlindspot = False
+  d.seconds(1.9)
+  assert d.dh.lane_change_state == LCS.preLaneChange and d.alc.state == AutoState.waiting
+  d.seconds(0.2)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting
+
+
+def test_no_radar_nudge_waits_two_seconds():
+  d = Drive(mode=MODE_NUDGE, radar=False)
+  d.cs.leftBlindspot = True
+  d.blinker("left")
+  d.seconds(1.0)
+  d.cs.steeringPressed, d.cs.steeringTorque = True, 1.0
+  d.cs.leftBlindspot = False
+  d.seconds(1.9)
+  assert d.dh.lane_change_state == LCS.preLaneChange and d.alc.state == AutoState.waiting
+  d.seconds(0.2)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting
+
+
+def test_no_radar_wait_runs_with_the_start_delay():
+  # the 2 s count from the blind spot clearing, at the same time as the delay after the turn signal: clear long before
+  # the turn signal, the start comes after the delay alone
+  d = Drive(radar=False)
+  d.seconds(3.0)
+  first = len(d.states)
+  d.blinker("left")
+  d.seconds(2.0)
+  start = next(i for i, s in enumerate(d.states) if i >= first and s[0] == LCS.laneChangeStarting)
+  assert (start - first + 1) * DT_MDL == pytest.approx(1.0, abs=DT_MDL)
 
 
 def drive_into_change(d, side="left"):
@@ -341,7 +432,7 @@ def random_world(seed, frames=4000):
   return rows
 
 
-def run_sequence(rows, alc):
+def run_sequence(rows, alc, check=True):
   dh = DesireHelper()
   out = []
   for cs, lat, prob, engaged, offset in rows:
@@ -350,23 +441,37 @@ def run_sequence(rows, alc):
             "driverMonitoringState": SimpleNamespace(disableReason=DM.DisableReason.none, alertLevel=DM.AlertLevel.none)}
       alc.update(sm, model(offset), dh.lane_change_state, prob)
     dh.update(cs, lat, prob, alc)
-    if alc is not None:
-      assert alc.publish_state(dh.lane_change_state) == AutoState.none
+    state = alc.publish_state(dh.lane_change_state) if alc is not None else None
+    if alc is not None and check:
+      assert state == AutoState.none
       assert alc.return_curvature(model(offset), cs.vEgo) is None
     out.append((dh.lane_change_state, dh.lane_change_direction, dh.desire, round(dh.lane_change_timer, 6)))
   return out
 
 
 @pytest.mark.parametrize("seed", range(5))
-def test_setting_off_matches_stock(seed):
+def test_without_blindspot_monitor_matches_stock(seed):
+  # vehicles without a blind-spot monitor keep the stock nudge in 1 and 2; with one, 2 never engaged equals 1
   rows = random_world(seed)
   stock = run_sequence(rows, None)
   assert {s[0] for s in stock} >= {LCS.off, LCS.preLaneChange, LCS.laneChangeStarting}
-  for cp in (car_params(True), car_params(False), car_params(True, "toyota")):
-    assert run_sequence(rows, AutoLaneChange(cp, enabled=False)) == stock
-  # supported setting on, but never engaged: still stock
+  for cp in (car_params(False), car_params(True, "toyota")):
+    for mode in (MODE_NUDGE, MODE_AUTO):
+      assert run_sequence(rows, AutoLaneChange(cp, mode=mode)) == stock
   rows_off = [(cs, lat, prob, False, off) for cs, lat, prob, _, off in rows]
-  assert run_sequence(rows_off, AutoLaneChange(car_params(True), enabled=True)) == run_sequence(rows_off, None)
+  never_engaged = run_sequence(rows_off, AutoLaneChange(car_params(True), mode=MODE_AUTO), check=False)
+  assert never_engaged == run_sequence(rows_off, AutoLaneChange(car_params(True), mode=MODE_NUDGE), check=False)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_nudge_mode_starts_only_on_the_nudge(seed):
+  rows = random_world(seed)
+  out = run_sequence(rows, AutoLaneChange(car_params(True), mode=MODE_NUDGE), check=False)
+  starts = [i for i in range(1, len(out)) if out[i][0] == LCS.laneChangeStarting and out[i - 1][0] == LCS.preLaneChange]
+  assert starts
+  for i in starts:
+    cs = rows[i][0]
+    assert cs.steeringPressed and (cs.steeringTorque > 0) == (out[i][1] == LCD.left)
 
 
 @pytest.mark.parametrize("seed", range(3))
@@ -427,11 +532,11 @@ def test_supported_vehicles():
   assert not AutoLaneChange(car_params(False), enabled=True).enabled
 
 
-def test_reader_falls_back_to_off():
+def test_reader_falls_back_to_the_default():
   class Broken:
     def get(self, *a, **k):
       raise RuntimeError("broken")
-  assert alc_mod.read_auto_lane_change(Broken()) is False
+  assert alc_mod.read_lane_change_mode(Broken()) == alc_mod.MODE_DEFAULT == MODE_NUDGE
 
 
 # ---- navigation turn signal (decision 8)
@@ -467,11 +572,15 @@ def test_gateway_conditions():
 def test_catalog_entries():
   catalog = json.loads(open(__file__.rsplit("/tests/", 1)[0] + "/config/kova_params.json").read())
   settings = {s["key"]: s for s in catalog["settings"]}
-  for key, group, condition in (("steering.auto_lane_change", "steering", "blindSpotMonitor"),
-                                ("navigation.auto_blinker", "navigation", "blinkerOutput")):
+  for key, group, condition, options, default, control in (
+      ("steering.lane_change_mode", "steering", "blindSpotMonitor", [0, 1, 2], 1, None),
+      ("navigation.auto_blinker", "navigation", "blinkerOutput", [0, 1], 0, "switch")):
     s = settings[key]
-    assert (s["groupId"], s["options"], s["defaultValue"], s["control"]) == (group, [0, 1], 0, "switch")
+    assert (s["groupId"], s["options"], s["defaultValue"], s.get("control")) == (group, options, default, control)
     assert [d["condition"] for d in s["dependencies"]] == [condition]
+  assert "steering.auto_lane_change" not in settings
+  titles = settings["steering.lane_change_mode"]["optionTitles"]
+  assert [titles[str(i)]["ko"] for i in range(3)] == ["끔", "조향 개입 시", "자동"]
 
 
 def packet(**fields):
