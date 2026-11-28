@@ -9,6 +9,7 @@ from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slo
 from openpilot.kovapilot.config.parked_setting import fresh_message, parked_and_disengaged, parked_for_settings as parked_for_settings
 from openpilot.kovapilot.gateway.navigation_status import (NAVIGATION_FRESH_NS, AutoLaneChangeSetting,
                                                           auto_lane_change_fields, navigation_fields)
+from openpilot.kovapilot.gateway.radar_objects import RadarObjects
 
 
 LANE_MIN_PROB = 0.2  # below this the app hides even an already shown ego lane line
@@ -59,7 +60,7 @@ def _model_fields(model):
   return fields
 
 
-def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
+def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None, radar_objects=None):
   if not fresh_message(sm, now_ns, "carState"):
     return None
   car = sm["carState"]
@@ -84,6 +85,10 @@ def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
     scene.update(navigation_fields(sm["kovaNavigation"], now_ns))
   scene.update(auto_lane_change_fields(sm["modelV2"] if fresh_message(sm, now_ns, "modelV2") else None, car,
                                        auto_lane_change_setting))
+  # radar vehicles for the road view; left out without current, error free radar tracks (radar_objects.py)
+  objects = radar_objects(sm, now_ns) if radar_objects is not None else None
+  if objects is not None:
+    scene["objects"] = objects
   return scene
 
 
@@ -98,12 +103,14 @@ class CerealTelemetry:
   def __init__(self):
     from openpilot.cereal.messaging import SubMaster
 
-    self.sm = SubMaster(["carState", "carControl", "selfdriveState", "modelV2", "managerState", "kovaNavigation"])
+    self.sm = SubMaster(["carState", "carControl", "selfdriveState", "modelV2", "managerState", "kovaNavigation",
+                         "radarTracks", "radarState"])
     self.auto_lane_change_setting = AutoLaneChangeSetting()
+    self.radar_objects = RadarObjects()
 
   def __call__(self):
     self.sm.update(0)
-    return road_scene(self.sm, time.monotonic_ns(), self.auto_lane_change_setting())
+    return road_scene(self.sm, time.monotonic_ns(), self.auto_lane_change_setting(), self.radar_objects)
 
   def is_parked(self) -> bool:
     self.sm.update(0)
