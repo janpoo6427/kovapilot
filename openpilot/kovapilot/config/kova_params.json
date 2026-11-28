@@ -41,6 +41,28 @@
       "description": {"ko": "콤마 전원 관련 설정입니다.", "en": "Comma power settings."}
     }
   ],
+  "bundles": [
+    {
+      "id": "navigation.speed_limits",
+      "groupId": "navigation",
+      "order": 100,
+      "title": {"ko": "내비 속도 제한", "en": "Navigation speed limits"},
+      "description": {
+        "ko": "카메라, 도로 제한속도, 과속방지턱 감속을 한 항목에서 따로 고릅니다.",
+        "en": "Choose speed camera, road speed limit and speed bump slowdown separately in one item."
+      }
+    },
+    {
+      "id": "cruise.curve_slowdowns",
+      "groupId": "cruise",
+      "order": 150,
+      "title": {"ko": "커브 감속", "en": "Curve slowdown"},
+      "description": {
+        "ko": "카메라로 본 커브 감속과 내비 회전 감속을 한 항목에서 따로 켭니다.",
+        "en": "Turn vision curve slowdown and navigation turn slowdown on separately in one item."
+      }
+    }
+  ],
   "settings": [
     {
       "key": "steering.always_on",
@@ -120,6 +142,7 @@
         {"condition": "verifiedCameraInput", "title": {"ko": "검증된 내비 카메라 입력", "en": "Verified navigation camera input"}}
       ],
       "groupId": "navigation",
+      "bundleId": "navigation.speed_limits",
       "order": 100,
       "type": "enum",
       "options": [0, 1, 2, 3],
@@ -134,6 +157,64 @@
       "description": {
         "ko": "카메라 목표속도 도달 지점과 통과 후 복귀 성향을 설정합니다.",
         "en": "Selects where to reach the camera target speed and how quickly to resume after passing."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
+      "key": "navigation.road_speed_limit_profile",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "verifiedCameraInput", "title": {"ko": "검증된 내비 입력", "en": "Verified navigation input"}}
+      ],
+      "groupId": "navigation",
+      "bundleId": "navigation.speed_limits",
+      "order": 102,
+      "type": "enum",
+      "options": [0, 1, 2, 3],
+      "optionTitles": {
+        "0": {"ko": "사용 안 함", "en": "Off"},
+        "1": {"ko": "여유", "en": "Early"},
+        "2": {"ko": "균형", "en": "Balanced"},
+        "3": {"ko": "근접", "en": "Late"}
+      },
+      "defaultValue": 0,
+      "title": {"ko": "도로 제한속도 프로필", "en": "Road speed limit profile"},
+      "description": {
+        "ko": "도로 제한속도가 크루즈 설정속도보다 낮으면 그 속도로 줄이고, 제한이 높아지거나 없어지면 돌아오는 성향을 설정합니다. 순정 내비나 Carrot 링크의 지금 제한속도를 씁니다.",
+        "en": "Slows to the road speed limit when it is below your cruise set speed and selects how quickly to resume when the limit rises or ends. Uses the current limit from the stock navigation or the Carrot link."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "offroad",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
+      "key": "navigation.speed_bump_profile",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}},
+        {"condition": "verifiedCameraInput", "title": {"ko": "검증된 내비 입력", "en": "Verified navigation input"}}
+      ],
+      "groupId": "navigation",
+      "bundleId": "navigation.speed_limits",
+      "order": 104,
+      "type": "enum",
+      "options": [0, 1, 2, 3],
+      "optionTitles": {
+        "0": {"ko": "사용 안 함", "en": "Off"},
+        "1": {"ko": "여유", "en": "Early"},
+        "2": {"ko": "균형", "en": "Balanced"},
+        "3": {"ko": "근접", "en": "Late"}
+      },
+      "defaultValue": 0,
+      "title": {"ko": "과속방지턱 감속 프로필", "en": "Speed bump profile"},
+      "description": {
+        "ko": "과속방지턱 앞 35km/h 도달 지점과 지난 뒤 복귀 성향을 설정합니다. Carrot 링크 내비 안내만 쓰고 고속도로에서는 쓰지 않습니다.",
+        "en": "Selects where to reach 35 km/h before a speed bump and how quickly to resume after it. Uses Carrot link guidance only, not on motorways."
       },
       "access": "readWrite",
       "risk": "control",
@@ -242,6 +323,7 @@
         {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}}
       ],
       "groupId": "cruise",
+      "bundleId": "cruise.curve_slowdowns",
       "order": 150,
       "type": "enum",
       "control": "switch",
@@ -252,6 +334,30 @@
       "description": {
         "ko": "오픈파일럿이 속도를 제어할 때 커브 앞에서 감속하고, 커브를 벗어나면 크루즈 설정속도 쪽으로 돌아옵니다. 설정은 P에 두고 완전히 정차하면 반영돼요.",
         "en": "When openpilot controls speed, it slows before a curve and returns toward your cruise set speed after it. Changes apply while stopped in Park."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "parked",
+      "savePolicy": "anytime",
+      "availability": "pendingConsumer"
+    },
+    {
+      "key": "cruise.nav_turn_slowdown",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}}
+      ],
+      "groupId": "cruise",
+      "bundleId": "cruise.curve_slowdowns",
+      "order": 152,
+      "type": "enum",
+      "control": "switch",
+      "options": [0, 1],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
+      "defaultValue": 0,
+      "title": {"ko": "내비 회전 감속", "en": "Navigation turn slowdown"},
+      "description": {
+        "ko": "오픈파일럿이 속도를 제어할 때 Carrot 링크 내비 안내의 좌·우회전, 유턴, 회전교차로 앞에서 감속하고, 지나면 크루즈 설정속도 쪽으로 돌아옵니다. 설정은 P에 두고 완전히 정차하면 반영돼요.",
+        "en": "When openpilot controls speed, it slows before left and right turns, U-turns and roundabouts in the Carrot link guidance and returns toward your cruise set speed after them. Changes apply while stopped in Park."
       },
       "access": "readWrite",
       "risk": "control",

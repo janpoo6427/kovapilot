@@ -14,6 +14,7 @@
       "items": {"type": "string", "minLength": 2}
     },
     "groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
+    "bundles": {"type": "array", "items": {"$ref": "#/$defs/bundle"}, "description": "Optional: settings sharing a bundleId are shown as one item; each keeps its own key and value"},
     "settings": {"type": "array", "items": {"$ref": "#/$defs/setting"}}
   },
   "additionalProperties": true,
@@ -34,12 +35,25 @@
       },
       "additionalProperties": true
     },
+    "bundle": {
+      "type": "object",
+      "required": ["id", "groupId", "title", "description"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+        "groupId": {"type": "string"},
+        "order": {"type": "integer"},
+        "title": {"$ref": "#/$defs/localizedText"},
+        "description": {"$ref": "#/$defs/localizedText"}
+      },
+      "additionalProperties": true
+    },
     "setting": {
       "type": "object",
       "required": ["key", "groupId", "type", "defaultValue", "title", "description", "access", "risk", "applyPolicy", "availability"],
       "properties": {
         "key": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
         "groupId": {"type": "string"},
+        "bundleId": {"type": "string", "description": "Optional bundle id; the bundle must be in the same group"},
         "order": {"type": "integer"},
         "type": {"enum": ["integer", "number", "enum"]},
         "defaultValue": {"type": "number"},

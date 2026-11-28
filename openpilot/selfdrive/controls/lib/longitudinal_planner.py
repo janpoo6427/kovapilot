@@ -60,7 +60,8 @@ class LongitudinalPlanner:
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
   def update(self, sm, *, camera_speed_cap=None, camera_eligible=False, curve_speed_cap=None, curve_eligible=False,
-             lead_restart=None, now_ns=0, camera_decel_mps2=None):
+             lead_restart=None, now_ns=0, camera_decel_mps2=None, road_limit_speed_cap=None, road_limit_eligible=False,
+             road_limit_decel_mps2=None, bump_speed_cap=None, bump_eligible=False, nav_turn_speed_cap=None, nav_turn_eligible=False):
     v_ego = sm['carState'].vEgo
     personality = sm['selfdriveState'].personality
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
@@ -127,9 +128,11 @@ class LongitudinalPlanner:
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop),
                   (output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e)]
 
-    if ((camera_eligible or curve_eligible) and self.CP.openpilotLongitudinalControl and not self.CP.dashcamOnly and
-        not reset_state and not sm['controlsState'].forceDecel):
-      caps = {"camera": (camera_speed_cap, camera_eligible), "curve": (curve_speed_cap, curve_eligible)}
+    if ((camera_eligible or curve_eligible or road_limit_eligible or bump_eligible or nav_turn_eligible) and
+        self.CP.openpilotLongitudinalControl and not self.CP.dashcamOnly and not reset_state and not sm['controlsState'].forceDecel):
+      caps = {"camera": (camera_speed_cap, camera_eligible), "curve": (curve_speed_cap, curve_eligible),
+              "road_limit": (road_limit_speed_cap, road_limit_eligible), "bump": (bump_speed_cap, bump_eligible),
+              "nav_turn": (nav_turn_speed_cap, nav_turn_eligible)}
       if self.speed_cap_source is not None and not caps[self.speed_cap_source][1]:
         self.a_speed_cap = None
         self.speed_cap_source = None
@@ -139,11 +142,12 @@ class LongitudinalPlanner:
         cap, self.speed_cap_source = selected
         cap_prev = self.a_speed_cap if self.a_speed_cap is not None else a_cruise_prev
         a_min, a_max = A_CRUISE_MIN, ACCEL_MAX
-        if (self.speed_cap_source == "camera" and camera_decel_mps2 is not None and isfinite(camera_decel_mps2)
-            and camera_decel_mps2 > -A_CRUISE_MIN):
+        # Stock navigation cameras and road limits plan stronger decelerations than the cruise limit.
+        cap_decel_mps2 = {"camera": camera_decel_mps2, "road_limit": road_limit_decel_mps2}.get(self.speed_cap_source)
+        if cap_decel_mps2 is not None and isfinite(cap_decel_mps2) and cap_decel_mps2 > -A_CRUISE_MIN:
           # The camera approach was planned for this deceleration; follow it, never beyond A_SPEED_CAP_MIN,
           # and settle onto the cap from below without overshooting it (the jerk limits still apply).
-          a_min = max(-camera_decel_mps2, A_SPEED_CAP_MIN)
+          a_min = max(-cap_decel_mps2, A_SPEED_CAP_MIN)
           a_max = min(ACCEL_MAX, max(0.0, (cap - v_ego) / SPEED_CAP_SETTLE_TIME))
         self.a_speed_cap = get_cruise_accel(cap, v_ego, cap_prev, self.output_a_target, self.dt, a_min, a_max)
       elif self.a_speed_cap is not None:

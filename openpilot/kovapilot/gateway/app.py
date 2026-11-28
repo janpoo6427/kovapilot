@@ -16,6 +16,7 @@ from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
   CURVE_SLOWDOWN_KEY,
   LEAD_RESTART_KEY,
+  NAV_TURN_SLOWDOWN_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsReadOnlyError,
   KovaParamsRevisionConflict,
@@ -39,6 +40,9 @@ OFFROAD_PROVIDER_KEY = web.AppKey("offroad_provider", Callable[[], bool])
 PARKED_PROVIDER_KEY = web.AppKey("parked_provider", Callable[[], bool])
 APPLIED_CRUISE_PROVIDER_KEY = web.AppKey("applied_cruise_provider", Callable[[], int | None])
 APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], int | str | None])
+APPLIED_NAV_TURN_PROVIDER_KEY = web.AppKey("applied_nav_turn_provider", Callable[[], int | str | None])
+# The two switches of the curve slowdown item, applied the same way by plannerd.
+CURVE_PROVIDER_KEYS = {CURVE_SLOWDOWN_KEY: APPLIED_CURVE_PROVIDER_KEY, NAV_TURN_SLOWDOWN_KEY: APPLIED_NAV_TURN_PROVIDER_KEY}
 APPLIED_LEAD_RESTART_PROVIDER_KEY = web.AppKey("applied_lead_restart_provider", Callable[[], int | None])
 APPLIED_AUTO_ENGAGE_PROVIDER_KEY = web.AppKey("applied_auto_engage_provider", Callable[[], dict | None])
 DEPENDENCY_CONDITIONS_KEY = web.AppKey("dependency_conditions", Callable[[], dict[str, str]])
@@ -82,13 +86,14 @@ def _dependency_conditions(request: web.Request) -> dict[str, str]:
   return provider() if provider is not None else {}
 
 
-def _curve_application(request: web.Request, conditions: dict[str, str]) -> int | str | None:
+def _curve_application(request: web.Request, conditions: dict[str, str],
+                       provider_key=APPLIED_CURVE_PROVIDER_KEY) -> int | str | None:
   longitudinal = conditions.get("openpilotLongitudinalApplied")
   if longitudinal == "unsupported":
     return "unsupported"
   if longitudinal in ("unmet", "pendingRestart"):
     return "awaitingLongitudinal"
-  provider = request.app.get(APPLIED_CURVE_PROVIDER_KEY)
+  provider = request.app.get(provider_key)
   applied = provider() if provider is not None else None
   # Without vehicle capability data, the planner cannot distinguish a disabled
   # longitudinal preference from an unsupported vehicle or planner.
@@ -108,15 +113,16 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
       provider = applied_cruise
       if provider is None:
         setting["applyState"] = "awaitingStart"
-    elif setting["key"] == CURVE_SLOWDOWN_KEY:
-      applied = _curve_application(request, conditions)
+    elif setting["key"] in CURVE_PROVIDER_KEYS:
+      provider_key = CURVE_PROVIDER_KEYS[setting["key"]]
+      applied = _curve_application(request, conditions, provider_key)
       if applied == "unsupported":
         setting["applyStatus"] = "unsupported"
         setting["access"] = "readOnly"
       elif applied == "awaitingLongitudinal":
         setting["applyStatus"] = "available"
         setting["applyState"] = applied
-      elif APPLIED_CURVE_PROVIDER_KEY in request.app:
+      elif provider_key in request.app:
         setting["applyStatus"] = "available"
         if applied is None:
           setting["applyState"] = "awaitingStart"
@@ -211,7 +217,8 @@ async def update_kova_params(request: web.Request) -> web.Response:
     return _error(400, "invalid_json", "request body must be valid JSON")
 
   store = request.app[KOVA_PARAMS_STORE_KEY]
-  if key == CURVE_SLOWDOWN_KEY and _curve_application(request, _dependency_conditions(request)) == "unsupported":
+  if key in CURVE_PROVIDER_KEYS and _curve_application(request, _dependency_conditions(request),
+                                                       CURVE_PROVIDER_KEYS[key]) == "unsupported":
     return _error(403, "update_forbidden", "curve slowdown is unsupported by the vehicle or planner")
   device_state = _device_state(request)
   try:
@@ -485,6 +492,7 @@ async def device_restart(request):
 def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, parked_provider: Callable[[], bool] | None = None,
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
+               applied_nav_turn_provider: Callable[[], int | str | None] | None = None,
                applied_lead_restart_provider: Callable[[], int | None] | None = None,
                applied_auto_engage_provider: Callable[[], dict | None] | None = None,
                dependency_conditions: Callable[[], dict[str, str]] | None = None,
@@ -499,6 +507,8 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[APPLIED_CRUISE_PROVIDER_KEY] = applied_cruise_provider
   if applied_curve_provider is not None:
     app[APPLIED_CURVE_PROVIDER_KEY] = applied_curve_provider
+  if applied_nav_turn_provider is not None:
+    app[APPLIED_NAV_TURN_PROVIDER_KEY] = applied_nav_turn_provider
   if applied_lead_restart_provider is not None:
     app[APPLIED_LEAD_RESTART_PROVIDER_KEY] = applied_lead_restart_provider
   if applied_auto_engage_provider is not None:

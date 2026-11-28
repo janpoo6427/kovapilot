@@ -5,7 +5,7 @@ import time
 
 from openpilot.kovapilot.config.auto_engage_settings import applied_auto_engage
 from openpilot.kovapilot.config.cruise_sync_settings import applied_cruise_sync
-from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown
+from openpilot.kovapilot.config.curve_slowdown_settings import applied_curve_slowdown, applied_nav_turn_slowdown
 from openpilot.kovapilot.config.lead_restart_settings import applied_lead_restart
 from openpilot.kovapilot.config.parked_setting import fresh_message, parked_and_disengaged, parked_for_settings as parked_for_settings
 from openpilot.kovapilot.gateway.navigation_status import (NAVIGATION_FRESH_NS, AutoLaneChangeSetting,
@@ -118,6 +118,9 @@ class CerealTelemetry:
 
   def applied_curve_slowdown(self) -> int | str | None:
     return applied_curve_slowdown(self._running_pid("plannerd"))
+
+  def applied_nav_turn_slowdown(self) -> int | str | None:
+    return applied_nav_turn_slowdown(self._running_pid("plannerd"))
 
   def applied_lead_restart(self) -> int | None:
     return applied_lead_restart(self._running_pid("plannerd"))

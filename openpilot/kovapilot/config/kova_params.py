@@ -18,6 +18,10 @@ _LEGACY_BRIGHTNESS_MODES = {
   "auto": BRIGHTNESS_MODE_AUTO, "auto_dark": BRIGHTNESS_MODE_AUTO_DARK, "fixed": BRIGHTNESS_MODE_FIXED,
 }
 CURVE_SLOWDOWN_KEY = "cruise.curve_slowdown"
+NAV_TURN_SLOWDOWN_KEY = "cruise.nav_turn_slowdown"
+CAMERA_PROFILE_KEY = "navigation.speed_camera_profile"
+ROAD_LIMIT_PROFILE_KEY = "navigation.road_speed_limit_profile"
+SPEED_BUMP_PROFILE_KEY = "navigation.speed_bump_profile"
 LEAD_RESTART_KEY = "cruise.lead_restart_response"
 CRUISE_SYNC_KEY = "cruise.accelerator_sync"
 CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
@@ -177,6 +181,36 @@ def _validate_dependencies(settings: list[dict[str, Any]], locales: set[str]) ->
         _validate_value(by_key[linked_setting], dependency.get("equals"))
 
 
+def _validate_bundles(catalog: dict[str, Any], group_ids: set[str], locales: set[str]) -> None:
+  """Optional bundles: settings with the same bundleId are drawn as one item; each keeps its own value."""
+  bundles = catalog.get("bundles", [])
+  if not isinstance(bundles, list):
+    raise KovaParamsValidationError("catalog bundles must be an array")
+  bundle_groups: dict[str, str] = {}
+  for bundle in bundles:
+    if not isinstance(bundle, dict) or not isinstance(bundle.get("id"), str) or not bundle["id"] or bundle["id"] in bundle_groups:
+      raise KovaParamsValidationError("bundle ids must be unique strings")
+    if bundle.get("groupId") not in group_ids:
+      raise KovaParamsValidationError(f"unknown group for bundle {bundle['id']}")
+    if "order" in bundle and type(bundle["order"]) is not int:
+      raise KovaParamsValidationError(f"order for bundle {bundle['id']} must be an integer")
+    _validate_localized_text(bundle.get("title"), locales, f"bundle {bundle['id']} title")
+    _validate_localized_text(bundle.get("description"), locales, f"bundle {bundle['id']} description")
+    bundle_groups[bundle["id"]] = bundle["groupId"]
+  members = dict.fromkeys(bundle_groups, 0)
+  for setting in catalog["settings"]:
+    if "bundleId" not in setting:
+      continue
+    bundle_id = setting["bundleId"]
+    if bundle_id not in bundle_groups:
+      raise KovaParamsValidationError(f"unknown bundle for {setting['key']}")
+    if bundle_groups[bundle_id] != setting["groupId"]:
+      raise KovaParamsValidationError(f"bundle {bundle_id} and {setting['key']} must share a group")
+    members[bundle_id] += 1
+  if any(count == 0 for count in members.values()):
+    raise KovaParamsValidationError("every bundle needs at least one setting")
+
+
 def validate_catalog(catalog: Any) -> None:
   if not isinstance(catalog, dict) or catalog.get("schemaVersion") != 1:
     raise KovaParamsValidationError("catalog schemaVersion must be 1")
@@ -219,6 +253,7 @@ def validate_catalog(catalog: Any) -> None:
     _validate_constraints(setting, locales)
     _validate_value(setting, setting.get("defaultValue"))
   _validate_dependencies(settings, locales)
+  _validate_bundles(catalog, group_ids, locales)
 
 
 class KovaParamsStore:
@@ -260,6 +295,10 @@ class KovaParamsStore:
       values = state["values"]
       for key, setting in self._settings.items():
         value = values.get(key, setting["defaultValue"])
+        saved_camera = values.get(CAMERA_PROFILE_KEY)
+        if key == SPEED_BUMP_PROFILE_KEY and key not in values.keys() and type(saved_camera) is int:
+          # Speed bumps used to follow the camera profile: keep that until the driver changes it.
+          value = saved_camera
         if key not in values and isinstance(self._backend, ParamsKovaParamsBackend):
           legacy = self._backend.legacy_bool(key)
           if legacy is not None:

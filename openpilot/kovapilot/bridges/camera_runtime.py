@@ -2,7 +2,8 @@ from collections import deque
 from math import isfinite
 
 from openpilot.kovapilot.bridges.camera_shadow import CameraShadow
-from openpilot.kovapilot.config.kova_params import KovaParamsError, KovaParamsStore, ParamsKovaParamsBackend
+from openpilot.kovapilot.config.kova_params import (KovaParamsError, KovaParamsStore, ParamsKovaParamsBackend, ROAD_LIMIT_PROFILE_KEY,
+                                                   SPEED_BUMP_PROFILE_KEY)
 from openpilot.kovapilot.navigation.camera_input import CameraInput, MAX_CAMERA_AGE_NS
 from openpilot.kovapilot.navigation.camera_profile import CAMERA_PROFILE_KEY, PROFILE_ACCEL_MPS2, PROFILE_JERK_MPS3
 
@@ -11,14 +12,35 @@ CAMERA_EVENT_SERVICE = "kovaCameraEvents"
 CAMERA_BATCH_LIMIT = 16
 MAX_TRACKED_CAMERAS = 256
 MAX_MOTION_SAMPLE_GAP_NS = 250_000_000
+# kovaCameraEvents carries speed cameras, speed bumps and the road speed limit; each kind has its own
+# profile setting and its own CameraRuntime in plannerd.
+CAMERA_KIND, BUMP_KIND, ROAD_LIMIT_KIND = "camera", "bump", "road_limit"
+PROFILE_KEYS = {CAMERA_KIND: CAMERA_PROFILE_KEY, BUMP_KIND: SPEED_BUMP_PROFILE_KEY, ROAD_LIMIT_KIND: ROAD_LIMIT_PROFILE_KEY}
+ROAD_LIMIT_SOURCE = "road_limit"  # navigation/road_limit.py
+BUMP_EVENT_PREFIX = "bump-"  # carrot_link.EventTracker ids are kind-number
 
 
-def read_camera_profile(params) -> int:
+def read_profile(params, key: str) -> int:
   try:
-    value = KovaParamsStore(ParamsKovaParamsBackend(params)).values().get(CAMERA_PROFILE_KEY, 0)
+    value = KovaParamsStore(ParamsKovaParamsBackend(params)).values().get(key, 0)
   except (KovaParamsError, RuntimeError, OSError):
     return 0
   return value if type(value) is int and 0 <= value <= 3 else 0
+
+
+def read_camera_profile(params) -> int:
+  return read_profile(params, CAMERA_PROFILE_KEY)
+
+
+def read_profiles(params) -> dict[str, int]:
+  """Profile of every kovaCameraEvents kind, 0 when off or unreadable."""
+  return {kind: read_profile(params, key) for kind, key in PROFILE_KEYS.items()}
+
+
+def camera_event_kind(source: str, event_id: str) -> str:
+  if source == ROAD_LIMIT_SOURCE:
+    return ROAD_LIMIT_KIND
+  return BUMP_KIND if event_id.startswith(BUMP_EVENT_PREFIX) else CAMERA_KIND
 
 
 def camera_cruise_speed(sm, cruise_max_kph: float, cruise_unset_kph: float, kph_to_mps: float) -> float | None:
@@ -38,8 +60,10 @@ def camera_cruise_speed(sm, cruise_max_kph: float, cruise_unset_kph: float, kph_
 
 class CameraRuntime:
   def __init__(self, profile: int, *, decel_limit_mps2: float = PROFILE_ACCEL_MPS2, jerk_limit_mps3: float = PROFILE_JERK_MPS3,
-               response_time_s: float = 0.0, estimated_distance_sources: dict[str, float] | None = None):
+               response_time_s: float = 0.0, estimated_distance_sources: dict[str, float] | None = None, kind: str | None = None):
     self.profile = profile
+    # None follows every event (offline tools); plannerd gives each kind its own runtime.
+    self.kind = kind
     self.policy = CameraShadow(profile, decel_limit_mps2=decel_limit_mps2, jerk_limit_mps3=jerk_limit_mps3,
                                response_time_s=response_time_s, estimated_distance_sources=estimated_distance_sources)
     self.saturated = False
@@ -93,6 +117,8 @@ class CameraRuntime:
       return
 
     for item in batch:
+      if self.kind is not None and camera_event_kind(str(item.source), str(item.eventId)) != self.kind:
+        continue
       try:
         sample = CameraInput(item.source, item.session, item.eventId, item.sequence, item.observedMonoTime,
                              event.logMonoTime, str(item.state), bool(item.roadMatch and item.verifiedSinglePoint),
@@ -119,7 +145,7 @@ class CameraRuntime:
     selected = report["selected_candidate"]
     if selected is None:
       return None
-    kind, _, source = selected["source"].partition(":")
-    if kind == "camera":
+    candidate, _, source = selected["source"].partition(":")
+    if candidate == "camera":
       self.cap_decel_mps2 = self.policy.decel_limit(source)
     return selected["speed_mps"]

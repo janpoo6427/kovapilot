@@ -6,8 +6,8 @@ UDP 7706 JSON (carrot_link); both find the comma from the UDP 7705 advertisement
 accepted only from the Wi-Fi subnet. When both report, v2 is followed.
 
 Publishes kovaCameraEvents for plannerd when plannerd consumes them this drive (openpilot
-longitudinal and a speed camera profile), and kovaNavigation (turn-by-turn, road speed limit,
-remaining route) on every drive.
+longitudinal and a speed camera, speed bump or road speed limit profile), and kovaNavigation
+(turn-by-turn, road speed limit, remaining route) on every drive.
 """
 from functools import partial
 import ipaddress
@@ -19,11 +19,13 @@ from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.kovapilot.bridges.camera_runtime import CAMERA_BATCH_LIMIT, CAMERA_EVENT_SERVICE, read_camera_profile
+from openpilot.kovapilot.bridges.camera_runtime import (CAMERA_BATCH_LIMIT, CAMERA_EVENT_SERVICE, CAMERA_KIND, ROAD_LIMIT_KIND,
+                                                      read_profiles)
 from openpilot.kovapilot.navigation.carrot_link import (APP_TIMEOUT_NS, DISCOVERY_PORT, NAVI_PORT, MAX_PACKET_BYTES,
                                                        SDI_TIMEOUT_NS, CarrotApp, EventTracker, advertisement, lan_peer)
 from openpilot.kovapilot.navigation.carrot_navi_v2 import Snapshot, V2Receiver
 from openpilot.kovapilot.navigation.carrot_navi_v2_server import V2Server
+from openpilot.kovapilot.navigation.road_limit import RoadLimitTracker
 from openpilot.kovapilot.navigation.vehicle_navi import HDA_INFO_4A3_ADDR, NAVI_HU_ADDR, SIGNAL_TIMEOUT_NS, VEHICLE_SOURCE, \
   VehicleCameraTracker, decode_hda_info_4a3, decode_navi_hu
 
@@ -53,7 +55,7 @@ def vehicle_navi_signal(CP) -> tuple[int, int] | None:
 
 class NavCamera:
   def __init__(self, signal: tuple[int, int] | None, *, is_metric: bool = True, session: str | None = None,
-               v2: V2Receiver | None = None):
+               v2: V2Receiver | None = None, road_limit: bool = False):
     session = session or secrets.token_hex(6)
     # UDP 7706 and WebSocket v2 describe the same app; they share one tracker so a camera
     # keeps its event id when the app switches protocol.
@@ -65,6 +67,8 @@ class NavCamera:
     self.snapshot = Snapshot()
     self.guide_anchor: tuple[int, float] | None = None  # (reception ns, odo m) of the current guide point
     self.vehicle = VehicleCameraTracker(VEHICLE_SOURCE, session)
+    # Road limit events only while plannerd follows them (navigation.road_speed_limit_profile).
+    self.road_limit = RoadLimitTracker(session) if road_limit else None
     self.signal = signal
     self.is_metric = is_metric
     self.warning = None  # (mono ns, Warning)
@@ -123,6 +127,19 @@ class NavCamera:
     # carrot uses the stock warning only while no navigation app is connected.
     self.vehicle.update(warning, now_ns, self.odo_m, suppressed=connected)
     events += self.vehicle.step(now_ns, self.odo_m)
+    # Road limit: the v2 app while it reports, else the stock navigation while no app is connected (carrot).
+    # The legacy UDP app carries no limit navcamd reads, so the stock one stays suppressed while it is connected.
+    if self.road_limit is not None:
+      if self.v2_live:
+        road_limit = snapshot.road_limit_kph or None
+      elif connected:
+        road_limit = None
+      else:
+        road_limit = warning.limit_kph if warning is not None and warning.limit_kph > 0 else None
+      ego_mps = self.last_speed[1] if self.last_speed is not None else 0.0
+      self.road_limit.update(road_limit, now_ns, self.odo_m, ego_mps)
+      # Appended last: when a batch is full, cameras keep their place.
+      events += self.road_limit.step(now_ns, self.odo_m)
     return events[:CAMERA_BATCH_LIMIT]
 
   def remote(self):
@@ -266,11 +283,14 @@ def main():
 
   params = Params()
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
-  # plannerd reads camera events only with openpilot longitudinal and a speed camera profile;
-  # the guidance (kovaNavigation) is published on every drive.
-  profile = read_camera_profile(params) if CP.openpilotLongitudinalControl and not CP.dashcamOnly else 0
+  # plannerd reads camera events only with openpilot longitudinal and a speed camera, speed bump or
+  # road speed limit profile; the guidance (kovaNavigation) is published on every drive.
+  profiles = read_profiles(params) if CP.openpilotLongitudinalControl and not CP.dashcamOnly else {}
+  profile = max(profiles.values(), default=0)
 
-  nav = NavCamera(vehicle_navi_signal(CP) if profile else None, is_metric=params.get_bool("IsMetric"))
+  # The stock navigation CAN gives camera warnings and the road limit, no speed bumps.
+  vehicle_signal = vehicle_navi_signal(CP) if profiles.get(CAMERA_KIND) or profiles.get(ROAD_LIMIT_KIND) else None
+  nav = NavCamera(vehicle_signal, is_metric=params.get_bool("IsMetric"), road_limit=bool(profiles.get(ROAD_LIMIT_KIND)))
   version = params.get("Version") or ""
   version = version.decode("utf-8", "replace") if isinstance(version, bytes) else str(version)
   sm = messaging.SubMaster(["carState", "selfdriveState"])
@@ -285,7 +305,7 @@ def main():
   server = V2Server(nav.v2, accept_peer, interface=WIFI_INTERFACE)
   server.start()
   next_step_ns = next_navigation_ns = 0
-  cloudlog.info("navcamd: profile %d, vehicle signal %s", profile, nav.signal)
+  cloudlog.info("navcamd: profiles %s, vehicle signal %s", profiles, nav.signal)
 
   while True:
     sm.update(0)
