@@ -7,7 +7,8 @@ accepted only from the Wi-Fi subnet. When both report, v2 is followed.
 
 Publishes kovaCameraEvents for plannerd when plannerd consumes them this drive (openpilot
 longitudinal and a speed camera, speed bump or road speed limit profile), and kovaNavigation
-(turn-by-turn, road speed limit, remaining route) on every drive.
+(turn-by-turn, road speed limit, remaining route, whether the car navigation reports road info)
+on every drive.
 """
 from functools import partial
 import ipaddress
@@ -55,7 +56,7 @@ def vehicle_navi_signal(CP) -> tuple[int, int] | None:
 
 class NavCamera:
   def __init__(self, signal: tuple[int, int] | None, *, is_metric: bool = True, session: str | None = None,
-               v2: V2Receiver | None = None, road_limit: bool = False):
+               v2: V2Receiver | None = None, road_limit: bool = False, vehicle_cameras: bool = True):
     session = session or secrets.token_hex(6)
     # UDP 7706 and WebSocket v2 describe the same app; they share one tracker so a camera
     # keeps its event id when the app switches protocol.
@@ -70,6 +71,10 @@ class NavCamera:
     # Road limit events only while plannerd follows them (navigation.road_speed_limit_profile).
     self.road_limit = RoadLimitTracker(session) if road_limit else None
     self.signal = signal
+    # The stock warning becomes camera events only while plannerd follows them; it is read anyway for
+    # kovaNavigation.vehicleNaviValid (the cluster NAV icon).
+    self.vehicle_cameras = vehicle_cameras
+    self.vehicle_valid = False
     self.is_metric = is_metric
     self.warning = None  # (mono ns, Warning)
     self.odo_m = 0.0
@@ -124,6 +129,10 @@ class NavCamera:
     events = self.app.tracker.step(now_ns, self.odo_m)
 
     warning = self.warning[1] if self.warning is not None and 0 <= now_ns - self.warning[0] <= SIGNAL_TIMEOUT_NS else None
+    # The car navigation reports road info: a road speed limit or a camera warning, within SIGNAL_TIMEOUT_NS.
+    self.vehicle_valid = warning is not None and (warning.limit_kph > 0 or warning.camera)
+    if not self.vehicle_cameras:
+      warning = None
     # carrot uses the stock warning only while no navigation app is connected.
     self.vehicle.update(warning, now_ns, self.odo_m, suppressed=connected)
     events += self.vehicle.step(now_ns, self.odo_m)
@@ -155,6 +164,8 @@ class NavCamera:
     received = [t for t in (snapshot.last_received_ns, self.app.last_packet_ns) if t is not None]
     state = {"source": "carrotV2" if self.v2_live else ("carrotLegacy" if legacy else "none"),
              "lastReceivedMonoTime": max(received) if received else 0}
+    if self.vehicle_valid:
+      state["vehicleNaviValid"] = True  # schema default false
     if not self.v2_live:
       return state
     travelled = self.odo_m - self.guide_anchor[1] if self.guide_anchor is not None else 0.0
@@ -288,9 +299,11 @@ def main():
   profiles = read_profiles(params) if CP.openpilotLongitudinalControl and not CP.dashcamOnly else {}
   profile = max(profiles.values(), default=0)
 
-  # The stock navigation CAN gives camera warnings and the road limit, no speed bumps.
-  vehicle_signal = vehicle_navi_signal(CP) if profiles.get(CAMERA_KIND) or profiles.get(ROAD_LIMIT_KIND) else None
-  nav = NavCamera(vehicle_signal, is_metric=params.get_bool("IsMetric"), road_limit=bool(profiles.get(ROAD_LIMIT_KIND)))
+  # The stock navigation CAN gives camera warnings and the road limit, no speed bumps. It is read on every drive
+  # for kovaNavigation.vehicleNaviValid; its camera events only with a speed camera or road speed limit profile.
+  vehicle_cameras = bool(profiles.get(CAMERA_KIND) or profiles.get(ROAD_LIMIT_KIND))
+  nav = NavCamera(vehicle_navi_signal(CP), is_metric=params.get_bool("IsMetric"), road_limit=bool(profiles.get(ROAD_LIMIT_KIND)),
+                  vehicle_cameras=vehicle_cameras)
   version = params.get("Version") or ""
   version = version.decode("utf-8", "replace") if isinstance(version, bytes) else str(version)
   sm = messaging.SubMaster(["carState", "selfdriveState"])
@@ -305,7 +318,7 @@ def main():
   server = V2Server(nav.v2, accept_peer, interface=WIFI_INTERFACE)
   server.start()
   next_step_ns = next_navigation_ns = 0
-  cloudlog.info("navcamd: profiles %s, vehicle signal %s", profiles, nav.signal)
+  cloudlog.info("navcamd: profiles %s, vehicle signal %s, vehicle cameras %s", profiles, nav.signal, vehicle_cameras)
 
   while True:
     sm.update(0)

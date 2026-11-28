@@ -2596,6 +2596,7 @@ struct KovaNavigation {
   routeValid @8 :Bool;
   remainingDistanceM @9 :UInt32;
   remainingTimeS @10 :UInt32;
+  vehicleNaviValid @11 :Bool;  # the car navigation reported road info (speed limit or camera) within the last second
 
   struct Guide {
     valid @0 :Bool;

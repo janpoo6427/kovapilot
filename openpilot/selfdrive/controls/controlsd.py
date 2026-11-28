@@ -10,6 +10,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
+from openpilot.kovapilot.hud.navigation import navigation_active
 
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
@@ -41,7 +42,8 @@ class Controls:
 
     self.sm = messaging.SubMaster(['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                                    'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'kovaNavigation'],
+                                  poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited_by_safety = False
@@ -172,6 +174,9 @@ class Controls:
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
+    # KOVA: cluster NAV icon (green with openpilot longitudinal engaged, see kovapilot/hud/navigation.py)
+    hudControl.navigationActive = navigation_active(self.sm['kovaNavigation'], self.sm.logMonoTime['kovaNavigation'],
+                                                    self.sm.logMonoTime['carState'])
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
