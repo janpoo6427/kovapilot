@@ -7,7 +7,9 @@ import pytest
 from openpilot.selfdrive.ui.mici.onroad import long_indicator
 from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 
-STOCK_Y = (122, 136, 152)
+# every bar is distance_4 (56x13) at one pitch, three or four of them
+THREE_Y = (122, 138, 154)
+FOUR_Y = (122, 138, 154, 170)
 RECT = SimpleNamespace(x=0, y=0, width=72, height=240)
 
 
@@ -36,21 +38,21 @@ def bars(calls):
 
 
 @pytest.mark.parametrize("started", [True, False])
-def test_three_levels_draw_the_stock_bars(started):
+def test_three_levels_draw_three_bars(started):
   for personality in (0, 1, 2):
-    assert bars(draw(started=started, personality=personality, levels=3)) == list(zip(["distance_1", "distance_2", "distance_3"], STOCK_Y, strict=True))
+    assert bars(draw(started=started, personality=personality, levels=3)) == [("distance_4", y) for y in THREE_Y]
 
 
 def test_old_logs_without_levels_draw_three():
-  assert [y for _, y in bars(draw(started=True, personality=2, levels=None))] == list(STOCK_Y)
+  assert [y for _, y in bars(draw(started=True, personality=2, levels=None))] == list(THREE_Y)
 
 
 @pytest.mark.parametrize("started", [True, False])
 def test_four_levels_draw_four_bars(started):
   drawn = bars(draw(started=started, personality=3, levels=4, param_levels=4))
-  assert [name for name, _ in drawn] == ["distance_1", "distance_2", "distance_3", "distance_4"]
+  assert [name for name, _ in drawn] == ["distance_4"] * 4
   ys = [y for _, y in drawn]
-  assert ys == sorted(ys)
+  assert ys == list(FOUR_Y)
   # the fourth bar (13 px tall) ends above the 52 px steering wheel centered 36 px from the bottom
   wheel_top = RECT.height - 36 - 52 / 2
   assert ys[-1] + 13 / 2 + 1 <= wheel_top
