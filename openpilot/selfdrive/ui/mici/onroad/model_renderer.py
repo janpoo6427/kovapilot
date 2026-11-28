@@ -2,6 +2,7 @@ import numpy as np
 import raylib_nb as rl
 from openpilot.cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.kovapilot.display.radar_vehicles import RadarSideVehicles, radar_used
 from openpilot.selfdrive.controls.radard import RADAR_TO_CAMERA
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -15,6 +16,9 @@ LEAD_BAR_LENGTH = 10.0  # px
 LEAD_BAR_WIDTH = 1.8  # m
 LANE_EDGES = (-1.8, 1.8)  # m, a 3.6 m lane for a stop bar without lane lines
 LANE_LINE_PROB = 0.5
+
+# KOVA: radar vehicles in the side lanes are drawn like lead bars, dimmer so the lead stays the one to follow
+SIDE_VEHICLE_OPACITY = 0.6  # of the lead bar opacity
 
 STOP_SPEED = 1.0  # m/s, planned speed that counts as stopping
 STOP_APPEAR_DISTANCE = (8.0, 50.0)  # m
@@ -95,6 +99,10 @@ class ModelRenderer(BaseModelRenderer):
     super().__init__()
     self._lead_bars = [LeadVehicle(), LeadVehicle()]
     self._stop_point = StopPoint()
+    self._side_vehicles = RadarSideVehicles()
+    self._side_bars: dict[int, LeadVehicle] = {}
+    self._lead_track_ids: set[int] = set()
+    self._side_list = []
     self._torque_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
     self._visible = 0.0
 
@@ -149,10 +157,16 @@ class ModelRenderer(BaseModelRenderer):
 
     if render_lead_indicator:
       self._update_lead_bars(sm)
-      self._draw_lead_indicator()
     else:
       self._lead_bars = [LeadVehicle(), LeadVehicle()]
       self._stop_point = StopPoint()
+      self._lead_track_ids = set()
+
+    # KOVA: side-lane radar vehicles, under the lead bars (with or without openpilot longitudinal)
+    self._update_side_vehicles(sm)
+    self._draw_side_vehicles()
+    if render_lead_indicator:
+      self._draw_lead_indicator()
 
   def _update_lead_bars(self, sm):
     plan = sm['longitudinalPlan']
@@ -165,6 +179,12 @@ class ModelRenderer(BaseModelRenderer):
     # both leads can be the same vehicle
     if leads[0][0] and abs(leads[1][1] - leads[0][1]) < 3.0:
       leads[1] = (False, 0.0, 0.0)
+    # KOVA: radar tracks drawn as a lead bar are not drawn again as side vehicles
+    self._lead_track_ids = set()
+    if plan.longitudinalPlanSource != log.LongitudinalPlan.LongitudinalPlanSource.e2e or len(sm['modelV2'].leadsV3) <= 1:
+      radar = sm['radarState']
+      self._lead_track_ids = {int(lead.radarTrackId) for lead, (present, _, _) in zip((radar.leadOne, radar.leadTwo), leads, strict=True)
+                              if present and lead.radar}
 
     ss, cs = sm['selfdriveState'], sm['carState']
     # braking disengages without making openpilot unavailable
@@ -196,6 +216,35 @@ class ModelRenderer(BaseModelRenderer):
         y = np.interp(d_stop, line[:, 0], line[:, 1]) - path_y if prob > LANE_LINE_PROB and len(line) else default
         edges.append(f.update(y))
       self._stop_point.bar = self._get_lead_bar(lane, d_stop, 0.0, edges)
+
+  def _update_side_vehicles(self, sm):
+    ss, cs = sm['selfdriveState'], sm['carState']
+    available = ss.enabled or ss.engageable or cs.brakePressed
+    lane = self._path.raw_points
+    # the lane test runs on new radar or model data only (20 Hz), the bars move every frame
+    if sm.updated['radarTracks'] or sm.updated['modelV2']:
+      self._side_list = self._side_vehicles.update(sm, sm['modelV2'], cs.vEgo, radar_used(sm['carParams']), self._lead_track_ids)
+    current = {v.track_id: v for v in self._side_list} if available and len(lane) > 0 else {}
+    opacity = SIDE_VEHICLE_OPACITY * (0.8 - 0.4 * status_fade.weight(UIStatus.DISENGAGED))
+    for track_id, v in current.items():
+      bar = self._side_bars.setdefault(track_id, LeadVehicle())
+      d_rel = v.d_rel + RADAR_TO_CAMERA
+      # snap to a new vehicle instead of sliding over (as the lead bars)
+      if abs(v.y_rel - bar.y_filter.x) > 3.0:
+        bar.d_filter.initialized = bar.y_filter.initialized = False
+      bar.fade_filter.update(opacity)
+      bar.bar = self._get_lead_bar(lane, bar.d_filter.update(d_rel), bar.y_filter.update(v.y_rel))
+    # lost tracks fade out where they were
+    for track_id in [i for i in self._side_bars if i not in current]:
+      bar = self._side_bars[track_id]
+      if bar.fade_filter.update(0.0) < 1e-2:
+        del self._side_bars[track_id]
+
+  def _draw_side_vehicles(self):
+    offset = self._draw_offset()
+    for bar in self._side_bars.values():
+      if len(bar.bar):
+        draw_polygon(self._rect, bar.bar + offset, rl.Color(255, 255, 255, int(255 * bar.fade_filter.x)))
 
   def _get_lead_bar(self, lane, d_rel, y_rel, edges=(-LEAD_BAR_WIDTH / 2, LEAD_BAR_WIDTH / 2)):
     # bar on the road behind the lead, following the lane

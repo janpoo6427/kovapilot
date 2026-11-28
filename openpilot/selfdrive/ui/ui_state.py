@@ -60,6 +60,7 @@ class UIState:
         "onroadEvents",
         "extrinsicsCalibration",
         "radarState",
+        "radarTracks",
         "deviceState",
         "pandaStates",
         "carParams",
