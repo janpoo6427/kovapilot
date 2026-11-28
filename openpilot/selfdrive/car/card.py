@@ -16,6 +16,7 @@ from openpilot.kovapilot.config.cruise_sync_settings import publish_applied_crui
 from openpilot.kovapilot.config.kova_params import KovaParamsStore, ParamsKovaParamsBackend
 from openpilot.kovapilot.vehicle.always_lateral import apply_always_on_lateral, read_always_on_steering
 from openpilot.kovapilot.vehicle.pedal_resume import apply_pedal_resume
+from openpilot.kovapilot.vehicle.stock_hda_sync import apply_stock_hda_sync, read_stock_hda_sync
 from openpilot.kovapilot.config.auto_engage_settings import read_auto_engage
 
 from opendbc.car import DT_CTRL, structs
@@ -129,6 +130,8 @@ class Car:
     apply_always_on_lateral(self.CP, read_always_on_steering(KovaParamsStore(ParamsKovaParamsBackend(self.params))))
     # pedal resume (engagement.auto_engage) panda flag, also chosen once per session
     apply_pedal_resume(self.CP, read_auto_engage(self.params))
+    # stock camera MAIN/LFA sync (steering.stock_hda_sync) panda flag, also chosen once per session
+    apply_stock_hda_sync(self.CP, read_stock_hda_sync(KovaParamsStore(ParamsKovaParamsBackend(self.params))))
 
     if self.CP.secOcRequired:
       # Copy user key if available

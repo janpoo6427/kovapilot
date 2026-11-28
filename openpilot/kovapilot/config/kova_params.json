@@ -89,6 +89,29 @@
       "requiredCapabilities": ["alwaysSteering"]
     },
     {
+      "key": "steering.stock_hda_sync",
+      "dependencies": [
+        {"condition": "openpilotLongitudinalApplied", "setting": "cruise.openpilot_longitudinal", "title": {"ko": "openpilot 종방향 제어", "en": "Openpilot longitudinal control"}}
+      ],
+      "groupId": "steering",
+      "order": 105,
+      "type": "enum",
+      "control": "switch",
+      "options": [0, 1],
+      "optionTitles": {"0": {"ko": "끔", "en": "Off"}, "1": {"ko": "켬", "en": "On"}},
+      "defaultValue": 1,
+      "title": {"ko": "순정 MAIN·LFA 맞추기", "en": "Stock MAIN and LFA sync"},
+      "description": {
+        "ko": "지원 차량(현대·기아 CAN FD 각도 조향, openpilot 종방향)에서 순정 카메라의 크루즈 MAIN과 LFA가 openpilot 상태와 다르면 MAIN·LFA 버튼을 누른 것처럼 카메라에 한 번 보내 맞춥니다. 켜지면 켜고, 꺼지면(버튼·브레이크 해제) 끕니다. 운전자가 버튼을 누르는 동안과 직후에는 누르지 않고, 안 맞으면 몇 번만 다시 누릅니다. 순정 HDA 표시는 카메라 MAIN·LFA가 켜지고 고속도로일 때 나옵니다. 다음 시동부터 적용됩니다.",
+        "en": "On supported vehicles (Hyundai/Kia CAN FD angle steering with openpilot longitudinal), when the stock camera cruise MAIN or LFA differs from openpilot, sends one MAIN or LFA button press to the camera to match: on when openpilot engages, off when it disengages (button or brake). It does not press while you use the buttons or right after, and retries only a few times. Stock HDA shows when the camera MAIN and LFA are on and on a highway. Applies from the next start."
+      },
+      "access": "readWrite",
+      "risk": "control",
+      "applyPolicy": "restart",
+      "savePolicy": "anytime",
+      "availability": "available"
+    },
+    {
       "key": "steering.lane_change_mode",
       "dependencies": [
         {"condition": "blindSpotMonitor", "title": {"ko": "후측방 경고(BSM) 지원", "en": "Blind-spot monitor support"}}
