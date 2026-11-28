@@ -21,10 +21,11 @@ follow the personality) when
     started an automatic lane change (one automatic lane change per blinker).
 
 Vehicles without a blind-spot monitor keep the stock nudge in 1 and 2 (a radar object still blocks it, below). Before the
-car has crossed into the new lane, a blind-spot warning or a radar object on the target side cancels a lane change started
-either way and steers back to the centre of the original lane (return_curvature); an automatic one is also canceled by
-braking, steering the other way, disengaging or a stale blind-spot frame. Once it has crossed, the lane change is left to
-finish in the new lane.
+car has crossed into the new lane, a blind-spot warning or a radar object on the target side, braking, steering the other
+way, disengaging or a stale blind-spot frame cancels an automatic lane change and steers back to the centre of the original
+lane (return_curvature); once it has crossed, the lane change is left to finish in the new lane. A lane change the driver
+started with the nudge is not watched after it starts, as in stock openpilot (2026-11-28 IONIQ 9 drive 0000079f segment 58:
+the driver kept pushing through a blind-spot warning that came on during the change and finished it).
 
 A radar object blocks the nudge exactly as a blind-spot warning does in stock openpilot (DesireHelper stays in
 preLaneChange, selfdrived shows the stock laneChangeBlocked alert through modelV2.meta.kovaLaneChangeBlocked) on every car
@@ -456,11 +457,8 @@ class AutoLaneChange:
     return self.reason == ""
 
   def nudge_started(self, direction) -> None:
-    """A lane change started by the nudge: no automatic one in progress; in 1 and 2 it is watched for the side lane."""
+    """A lane change started by the nudge: no automatic one in progress, not watched after it starts (stock)."""
     self.reset()
-    if self.judged():
-      self.active_dir = direction
-      self.active_auto = False
 
   def radar_occupied(self, direction) -> bool:
     """The radar sees an object in the lane on that side: blocks the start like a blind-spot warning, nudge included."""
@@ -509,15 +507,8 @@ class AutoLaneChange:
     self.prev_offset = None
 
   def abort_reason(self, direction) -> str:
-    """Why a lane change in progress must stop before crossing ('' = keep going). Started by the nudge: a blind-spot
-    warning or a radar object on that side only; started automatically: also disengaging, braking, steering the other
-    way or a stale blind-spot frame."""
+    """Why an automatic lane change in progress must stop before crossing ('' = keep going)."""
     if self.active_dir == LaneChangeDirection.none or self.crossed:
-      return ""
-    if not self.active_auto:
-      for report in self.reports(direction):
-        if report.available and report.occupied:
-          return report.source
       return ""
     CS = self.CS
     if not self.engaged:

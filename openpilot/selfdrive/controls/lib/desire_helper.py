@@ -67,7 +67,7 @@ class DesireHelper:
           self.lane_change_state = LaneChangeState.laneChangeStarting
           self.lane_change_timer = 0.0
           if alc is not None:
-            alc.nudge_started(self.lane_change_direction)
+            alc.nudge_started(self.lane_change_direction)  # the driver lane change, not watched after it starts
         elif alc is not None and not blindspot_detected and alc.start_allowed(self.lane_change_direction):
           self.lane_change_state = LaneChangeState.laneChangeStarting
           self.lane_change_timer = 0.0
@@ -77,8 +77,7 @@ class DesireHelper:
         self.lane_change_timer += DT_MDL
 
         if alc is not None and alc.abort_reason(self.lane_change_direction):
-          # canceled before crossing (side lane taken; automatic: also brake, opposite steer, disengage): AutoLaneChange
-          # steers back to the original lane
+          # canceled automatic lane change before crossing: AutoLaneChange steers back to the original lane
           self.lane_change_state = LaneChangeState.off
           self.lane_change_direction = LaneChangeDirection.none
           self.lane_change_timer = 0.0

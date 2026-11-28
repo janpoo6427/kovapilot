@@ -175,19 +175,18 @@ def test_nudge_blocked_like_blindspot(enabled):
   assert d.dh.lane_change_state == LCS.laneChangeStarting
 
 
-def test_nudge_started_returns_for_an_object_before_crossing():
-  # 1: a nudged lane change is watched like an automatic one: a radar object before crossing steers back
+def test_nudge_started_is_not_stopped():
+  # stock: the blind spot is not looked at after a nudge started; neither is the radar (the start waits 1 s as in 2)
   d = RadarDrive(enabled=False)
   d.blinker("left")
   d.seconds(1.0)
   d.nudge("left")
   d.step()
   assert d.dh.lane_change_state == LCS.laneChangeStarting
-  d.cs.steeringPressed, d.cs.steeringTorque = False, 0.0
   d.points = [point(7, 0.0, LEFT_LANE_Y, 0.0)]
   d.lane_change_prob = 0.9
-  d.step(RADAR_HOLD_FRAMES)
-  assert d.dh.lane_change_state == LCS.off and d.alc.returning
+  d.seconds(1.0)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting and not d.alc.returning
 
 
 def test_object_during_auto_change_returns():

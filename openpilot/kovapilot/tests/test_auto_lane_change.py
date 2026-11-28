@@ -126,9 +126,9 @@ def test_off_mode_keeps_the_lane(bsm):
   assert d.dh.desire == log.Desire.none
 
 
-def test_nudge_mode_side_lane_check_and_return():
-  # 1: the nudge needs the same side-lane check as the automatic start (here the left lane is not seen); before crossing
-  # a blind-spot warning steers back as in 2, braking does not
+def test_nudge_mode_side_lane_check():
+  # 1: the nudge needs the same side-lane check as the automatic start (here the left lane is not seen); once started it
+  # is the driver lane change as in stock: braking or a blind-spot warning before crossing do not cancel it
   d = Drive(mode=MODE_NUDGE)
   d.left_lane = False
   d.seconds(1.0)
@@ -147,8 +147,8 @@ def test_nudge_mode_side_lane_check_and_return():
   assert d.dh.lane_change_state == LCS.laneChangeStarting
   d.cs.brakePressed = False
   d.cs.leftBlindspot = True
-  d.step()
-  assert d.dh.lane_change_state == LCS.off and d.alc.returning
+  d.step(3)
+  assert d.dh.lane_change_state == LCS.laneChangeStarting and not d.alc.returning
 
 
 def test_cruise_off_never_automatic():
