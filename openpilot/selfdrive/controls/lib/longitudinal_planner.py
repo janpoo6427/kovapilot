@@ -14,6 +14,7 @@ from openpilot.selfdrive.controls.lib.curve_speed import CurveSpeed
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import STOP_DISTANCE, get_T_FOLLOW
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
@@ -29,6 +30,31 @@ SPEED_CAP_SETTLE_TIME = 3.0
 CRUISE_ACCEL_RESPONSE_TIME = 1.0
 AGGRESSIVE_ACCEL_BOOST = 0.1  # m/s^2
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
+
+# KOVA: closing in on a slower lead from well beyond the following gap starts an early, gentle,
+# constant deceleration that removes the speed difference by the time the normal gap is reached.
+# It is one more candidate in the min() below, so it can only add braking; the MPC, its danger
+# constraint and the following gap at equal speed are unchanged.
+APPROACH_DECEL_START = 0.3   # m/s^2, start once removing the speed difference needs this much
+APPROACH_DECEL_STOP = 0.15   # m/s^2, stop below this (hysteresis)
+APPROACH_DECEL_MAX = 1.5     # m/s^2, a lead first needing more (late detection, cut-in) is left to the MPC
+APPROACH_MIN_CLOSING = 1.0   # m/s closing speed to start
+APPROACH_HOLD_CLOSING = 0.5  # m/s closing speed to keep going
+APPROACH_MIN_EXCESS = 10.0   # m beyond the following gap to start
+APPROACH_HOLD_EXCESS = 3.0   # m beyond the following gap to keep going
+APPROACH_JERK = 1.0          # m/s^3
+
+
+def get_approach_decel(lead, v_ego, t_follow, active=False):
+  """Constant deceleration that brings v_ego to the lead speed exactly at the following gap, or None."""
+  if not lead.present:
+    return None
+  closing = v_ego - lead.vLead
+  excess = lead.dRel - (t_follow * lead.vLead + STOP_DISTANCE)
+  min_closing, min_excess = (APPROACH_HOLD_CLOSING, APPROACH_HOLD_EXCESS) if active else (APPROACH_MIN_CLOSING, APPROACH_MIN_EXCESS)
+  if closing < min_closing or excess < min_excess:
+    return None
+  return closing**2 / (2. * excess)
 
 
 def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, a_target_prev, dt, a_min=A_CRUISE_MIN, a_max=ACCEL_MAX):
@@ -52,6 +78,8 @@ class LongitudinalPlanner:
     self.a_cruise = init_a
     self.a_speed_cap = None
     self.speed_cap_source = None
+    self.a_approach = None
+    self.approach_active = False
     self.output_a_target = init_a
     self.output_should_stop = False
 
@@ -163,6 +191,12 @@ class LongitudinalPlanner:
       self.a_speed_cap = None
       self.speed_cap_source = None
 
+    approach_enabled = self.CP.openpilotLongitudinalControl and not reset_state and not sm['controlsState'].forceDecel
+    a_approach = self.update_approach(sm['radarState'], v_ego, personality, a_prev, approach_enabled,
+                                      min(c[0] for c in candidates))
+    if a_approach is not None:
+      candidates.append((a_approach, LongitudinalPlanSource.lead0, False))
+
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
     if lead_restart is not None and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and not self.CP.dashcamOnly and not self.CP.notCar:
@@ -173,6 +207,32 @@ class LongitudinalPlanner:
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
+
+  def update_approach(self, radarstate, v_ego, personality, a_prev, enabled, a_others):
+    if not enabled:
+      self.approach_active = False
+      self.a_approach = None
+      return None
+    t_follow = get_T_FOLLOW(personality)
+    a_req = None
+    for lead in (radarstate.leadOne, radarstate.leadTwo):
+      a = get_approach_decel(lead, v_ego, t_follow, self.approach_active)
+      if a is not None and (a_req is None or a > a_req):
+        a_req = a
+    if self.approach_active:
+      self.approach_active = a_req is not None and a_req >= APPROACH_DECEL_STOP
+    else:
+      self.approach_active = a_req is not None and APPROACH_DECEL_START <= a_req <= APPROACH_DECEL_MAX
+    step = APPROACH_JERK * self.dt
+    if self.approach_active:
+      prev = self.a_approach if self.a_approach is not None else a_prev
+      self.a_approach = float(np.clip(-min(a_req, APPROACH_DECEL_MAX), prev - step, prev + step))
+    elif self.a_approach is not None:
+      # release at the same jerk; gone once the other candidates ask for less acceleration
+      self.a_approach += step
+      if self.a_approach >= a_others:
+        self.a_approach = None
+    return self.a_approach
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
