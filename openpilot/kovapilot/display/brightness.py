@@ -2,7 +2,8 @@
 
 The upstream auto-brightness pipeline (camera exposure, CIE curve, 10 s filter,
 backlight floor and UI dimming below it) stays unchanged. This module only maps
-the filtered upstream value to the user-selected onroad target.
+the filtered upstream value to the user-selected onroad target; the set brightness is
+the Fixed level and the maximum for both automatic modes.
 """
 from dataclasses import dataclass
 
@@ -19,7 +20,8 @@ MODES = (MODE_AUTO, MODE_AUTO_DARK, MODE_FIXED)
 
 FIXED_MIN = 10
 FIXED_MAX = 100
-DEFAULT_FIXED = 50
+# 100 keeps a fresh install on Auto identical to upstream auto; saved values are kept as they are.
+DEFAULT_FIXED = 100
 
 # Auto (dark) keeps the upstream daylight end (100%) and lowers the night floor.
 # Values below the backlight floor are produced by the UI dim overlay, not the backlight.
@@ -67,22 +69,28 @@ def onroad_brightness(filtered: float, settings: DisplayBrightnessSettings, *, o
   """Map the filtered upstream brightness (0-100) to the selected onroad target.
 
   filtered: upstream value after its first-order filter, before the backlight floor.
+  settings.fixed: the set brightness; Fixed uses it as the level, Auto and Auto (dark) never exceed it.
   auto_valid: the road camera light estimate is live (upstream light_sensor >= 0).
-  alert_active: an onroad alert is shown; the target never goes below upstream auto then.
+  alert_active: an onroad alert is shown; the target never goes below upstream auto then (the cap is lifted).
   auto_min: upstream BRIGHTNESS_MIN, the lowest value upstream auto produces.
   """
-  if not onroad or settings.mode == MODE_AUTO:
+  if not onroad:
     return filtered
 
-  if settings.mode == MODE_AUTO_DARK:
-    if not auto_valid:
-      return filtered
-    span = 100.0 - auto_min
-    level = (filtered - auto_min) / span if span > 0 else 1.0
-    level = min(max(level, 0.0), 1.0)
-    target = AUTO_DARK_MIN + level * (100.0 - AUTO_DARK_MIN)
+  # The one brightness number is the level in Fixed and the maximum in both automatic modes.
+  level_set = float(min(max(settings.fixed, FIXED_MIN), FIXED_MAX))
+  if settings.mode == MODE_AUTO:
+    target = min(filtered, level_set)
+  elif settings.mode == MODE_AUTO_DARK:
+    if auto_valid:
+      span = 100.0 - auto_min
+      level = (filtered - auto_min) / span if span > 0 else 1.0
+      level = min(max(level, 0.0), 1.0)
+      target = min(AUTO_DARK_MIN + level * (100.0 - AUTO_DARK_MIN), level_set)
+    else:
+      target = min(filtered, level_set)
   elif settings.mode == MODE_FIXED:
-    target = float(min(max(settings.fixed, FIXED_MIN), FIXED_MAX))
+    target = level_set
   else:
     return filtered
 

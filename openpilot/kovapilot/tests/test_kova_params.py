@@ -133,7 +133,7 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
     "schemaVersion": 1,
     "revision": 1,
     "values": {
-      "steering.always_on": 1, "display.onroad_brightness_mode": 0, "display.onroad_brightness_fixed": 50,
+      "steering.always_on": 1, "display.onroad_brightness_mode": 0, "display.onroad_brightness_fixed": 100,
       "navigation.speed_camera_profile": 0,
       CRUISE_SYNC_KEY: 0, CRUISE_SYNC_SHADOW_KEY: 0,
       CURVE_SLOWDOWN_KEY: 0,

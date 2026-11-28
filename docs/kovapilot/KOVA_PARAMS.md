@@ -77,14 +77,14 @@ All three profiles require the same continuously tracked, radar-matched lead to 
 
 ## Display: onroad screen brightness
 
-`display.onroad_brightness_mode` uses `0` for auto, `1` for auto (dark), and `2` for fixed. It defaults to `0`. `display.onroad_brightness_fixed` uses integers from 10 to 100 percent, with a step of 5 and a default of 50. Both settings have `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.
+`display.onroad_brightness_mode` uses `0` for auto, `1` for auto (dark), and `2` for fixed. It defaults to `0`. `display.onroad_brightness_fixed` (`화면 밝기`, screen brightness) uses integers from 10 to 100 percent, with a step of 5 and a default of 100. It is the level in `fixed` and the maximum in `auto` and `auto_dark`, so it has no mode condition and can be changed in every mode. Saved values are kept as they are (an install that saved 20 before gets a maximum of 20 in auto); only a fresh install starts at 100, which keeps auto identical to upstream. Both settings have `risk: display` and `applyPolicy: immediate`, so KovaLink may change them while driving.
 
 - The consumer is `openpilot/kovapilot/display/brightness.py`. The UI reads `KovaParams` in its 5 Hz params thread with a tolerant reader: an unreadable or invalid value falls back to `auto` instead of failing, because this is display-only.
 - The upstream auto-brightness pipeline is unchanged (camera exposure, CIE curve, 10 s filter, backlight floor of 30 %, UI dim overlay below the floor). `onroad_brightness()` only maps the filtered upstream value to the selected target, right before the floor/dim step in `Device._update_brightness`.
-- `auto`: identical to upstream for every input.
-- `auto_dark`: rescales the upstream range `[BRIGHTNESS_MIN, 100]` to `[10, 100]`, so low light gets darker and daylight stays at 100 %. Without a live road-camera light estimate it keeps the upstream value.
-- `fixed`: uses the fixed value. Values below 30 % are produced by the dim overlay, not the backlight.
-- While an onroad alert is shown (`selfdriveState.alertSize != none`) the result is never dimmer than upstream auto. Offroad brightness, the sleep timeout and display power are unchanged. Onroad screen-off is intentionally not offered.
+- `auto`: `min(upstream, screen brightness)`. At 100 % it is identical to upstream for every input.
+- `auto_dark`: rescales the upstream range `[BRIGHTNESS_MIN, 100]` to `[10, 100]`, so low light gets darker and daylight stays at 100 %, then caps it at the screen brightness. Without a live road-camera light estimate it keeps the upstream value, capped the same way.
+- `fixed`: uses the screen brightness. Values below 30 % are produced by the dim overlay, not the backlight.
+- While an onroad alert is shown (`selfdriveState.alertSize != none`) the result is never dimmer than upstream auto (the auto cap is lifted for the alert). Offroad brightness, the sleep timeout and display power are unchanged. Onroad screen-off is intentionally not offered.
 
 ## Power: automatic power off
 

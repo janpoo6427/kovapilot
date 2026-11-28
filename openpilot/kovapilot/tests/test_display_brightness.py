@@ -173,3 +173,80 @@ def test_display_settings_can_change_onroad_and_round_trip_to_ui_reader():
 def test_store_rejects_invalid_display_values(key, value):
   with pytest.raises(KovaParamsValidationError):
     KovaParamsStore(MemoryBackend()).update(key, value, 0, is_offroad=False)
+
+
+# 2026-11-28 janpoo: in the automatic modes the set brightness is the maximum.
+CAPS = (10, 20, 35, 50, 100)
+
+
+@pytest.mark.parametrize("cap", CAPS)
+@pytest.mark.parametrize("auto_valid", (True, False))
+@pytest.mark.parametrize("auto_min", AUTO_MINS)
+def test_auto_is_upstream_capped_by_set_brightness(cap, auto_valid, auto_min):
+  settings = DisplayBrightnessSettings(mode=MODE_AUTO, fixed=cap)
+  for filtered in FILTERED:
+    assert _run(filtered, settings, auto_valid=auto_valid, auto_min=auto_min) == min(filtered, float(cap))
+
+
+@pytest.mark.parametrize("cap", CAPS)
+@pytest.mark.parametrize("auto_min", AUTO_MINS)
+def test_auto_dark_is_capped_by_set_brightness(cap, auto_min):
+  capped = DisplayBrightnessSettings(mode=MODE_AUTO_DARK, fixed=cap)
+  uncapped = DisplayBrightnessSettings(mode=MODE_AUTO_DARK, fixed=100)
+  for filtered in FILTERED:
+    expected = min(_run(filtered, uncapped, auto_min=auto_min), float(cap))
+    assert _run(filtered, capped, auto_min=auto_min) == pytest.approx(expected)
+    assert _run(filtered, capped, auto_valid=False, auto_min=auto_min) == min(filtered, float(cap))
+
+
+def test_auto_cap_follows_upstream_below_the_cap():
+  settings = DisplayBrightnessSettings(mode=MODE_AUTO, fixed=60)
+  assert _run(42.5, settings) == 42.5
+  assert _run(60.0, settings) == 60.0
+  assert _run(77.7, settings) == 60.0
+
+
+@pytest.mark.parametrize("mode", (MODE_AUTO, MODE_AUTO_DARK))
+def test_auto_cap_is_lifted_while_an_alert_is_shown(mode):
+  capped = DisplayBrightnessSettings(mode=mode, fixed=10)
+  uncapped = DisplayBrightnessSettings(mode=mode, fixed=100)
+  for filtered in FILTERED:
+    assert _run(filtered, capped, alert=True) == pytest.approx(_run(filtered, uncapped, alert=True))
+    assert _run(filtered, capped, alert=True) >= filtered
+  assert _run(77.7, DisplayBrightnessSettings(mode=MODE_AUTO, fixed=10), alert=True) == 77.7
+
+
+@pytest.mark.parametrize("mode", (MODE_AUTO, MODE_AUTO_DARK))
+def test_auto_cap_out_of_range_is_clamped(mode):
+  assert _run(77.7, DisplayBrightnessSettings(mode=mode, fixed=1)) == 10.0
+  assert _run(77.7, DisplayBrightnessSettings(mode=mode, fixed=400)) == pytest.approx(_run(77.7, DisplayBrightnessSettings(mode=mode, fixed=100)))
+
+
+def test_new_install_default_keeps_auto_equal_to_upstream():
+  assert DEFAULT_FIXED == 100
+  settings = {item["key"]: item for item in load_bundled_catalog()["settings"]}
+  assert settings[FIXED_KEY]["defaultValue"] == 100
+  backend = MemoryBackend()
+  KovaParamsStore(backend).initialize_storage()
+  assert backend.value["values"][FIXED_KEY] == 100
+  assert load_display_brightness(FakeParams(backend.value)) == DisplayBrightnessSettings(MODE_AUTO, 100)
+
+
+def test_saved_brightness_is_kept_and_becomes_the_auto_maximum():
+  state = {"schemaVersion": 1, "revision": 30, "values": {MODE_KEY: MODE_AUTO, FIXED_KEY: 20}}
+  backend = MemoryBackend(state)
+  KovaParamsStore(backend).initialize_storage()
+  assert backend.value["values"][MODE_KEY] == MODE_AUTO
+  assert backend.value["values"][FIXED_KEY] == 20
+  settings = load_display_brightness(FakeParams(backend.value))
+  assert settings == DisplayBrightnessSettings(MODE_AUTO, 20)
+  assert _run(77.7, settings) == 20.0
+
+
+def test_set_brightness_has_no_mode_condition_and_saves_in_auto():
+  settings = {item["key"]: item for item in load_bundled_catalog()["settings"]}
+  assert not settings[FIXED_KEY].get("dependencies")
+  backend = MemoryBackend()
+  store = KovaParamsStore(backend)
+  store.update(FIXED_KEY, 40, 0, is_offroad=False)
+  assert load_display_brightness(FakeParams(backend.value)) == DisplayBrightnessSettings(MODE_AUTO, 40)

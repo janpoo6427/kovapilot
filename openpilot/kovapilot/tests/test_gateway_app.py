@@ -127,9 +127,10 @@ def test_gateway_reports_saved_and_applied_dependency_states_without_rewriting_p
 
       assert state(await setting(CRUISE_SYNC_KEY), "openpilotLongitudinalApplied") == "unknown"
       assert state(await setting("navigation.speed_camera_profile"), "verifiedCameraInput") == "unknown"
-      assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "unmet"
+      # The screen brightness is the Fixed level and the auto maximum: no mode condition in any mode.
+      assert not (await setting("display.onroad_brightness_fixed")).get("dependencies")
       assert (await update("display.onroad_brightness_mode", 2, 0))["revision"] == 1
-      assert (await setting("display.onroad_brightness_fixed"))["dependencies"][0]["state"] == "met"
+      assert not (await setting("display.onroad_brightness_fixed")).get("dependencies")
       assert (await update(CRUISE_SYNC_KEY, 1, 1))["revision"] == 2
 
       cp = car.CarParams.new_message(alphaLongitudinalAvailable=True, pcmCruise=True)

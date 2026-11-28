@@ -259,8 +259,8 @@
       },
       "title": {"ko": "주행 중 화면 밝기", "en": "Onroad screen brightness"},
       "description": {
-        "ko": "자동은 openpilot 기본 동작과 같습니다. 자동(어둡게)는 주변이 어두울수록 기본보다 더 어둡게(최저 10%) 합니다. 고정은 아래 고정 밝기를 씁니다. 경고가 떠 있는 동안에는 자동 밝기보다 어두워지지 않습니다.",
-        "en": "Auto matches the openpilot default. Auto (dark) dims further in low light (down to 10%). Fixed uses the fixed brightness below. While an alert is shown the screen is never dimmer than Auto."
+        "ko": "자동은 openpilot 기본 동작처럼 주변 밝기에 따라 바뀌고, 아래 화면 밝기를 넘지 않습니다. 자동(어둡게)는 주변이 어두울수록 기본보다 더 어둡게(최저 10%) 하고, 역시 아래 화면 밝기를 넘지 않습니다. 고정은 아래 화면 밝기를 그대로 씁니다. 경고가 떠 있는 동안에는 자동 밝기보다 어두워지지 않습니다.",
+        "en": "Auto follows the surroundings like the openpilot default, up to the screen brightness below. Auto (dark) dims further in low light (down to 10%), also up to the screen brightness below. Fixed uses the screen brightness below. While an alert is shown the screen is never dimmer than Auto."
       },
       "access": "readWrite",
       "risk": "display",
@@ -270,21 +270,18 @@
     },
     {
       "key": "display.onroad_brightness_fixed",
-      "dependencies": [
-        {"setting": "display.onroad_brightness_mode", "equals": 2, "title": {"ko": "화면 밝기 모드 · 고정", "en": "Screen brightness mode · Fixed"}}
-      ],
       "groupId": "display",
       "order": 110,
       "type": "integer",
-      "defaultValue": 50,
+      "defaultValue": 100,
       "minimum": 10,
       "maximum": 100,
       "step": 5,
       "unit": {"ko": "%", "en": "%"},
-      "title": {"ko": "고정 밝기", "en": "Fixed brightness"},
+      "title": {"ko": "화면 밝기", "en": "Screen brightness"},
       "description": {
-        "ko": "주행 중 화면 밝기가 고정일 때 쓰는 밝기입니다. 30% 아래는 백라이트 대신 화면을 어둡게 덮어 표현합니다.",
-        "en": "Brightness used when onroad screen brightness is Fixed. Values below 30% are produced by dimming the UI instead of the backlight."
+        "ko": "고정일 때는 이 밝기를 그대로 쓰고, 자동·자동(어둡게)일 때는 이 밝기가 최대 밝기입니다. 30% 아래는 백라이트 대신 화면을 어둡게 덮어 표현합니다.",
+        "en": "Fixed uses this brightness as is; Auto and Auto (dark) never go brighter than this. Values below 30% are produced by dimming the UI instead of the backlight."
       },
       "access": "readWrite",
       "risk": "display",
