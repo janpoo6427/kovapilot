@@ -79,7 +79,8 @@ def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 
 def link_git_update(started: bool, params: Params, CP: car.CarParams) -> bool:
   # A KovaLink version change is accepted in Park with the vehicle on; updated
-  # waits for Park or offroad before it stages and finalizes the checkout.
+  # waits for Park or offroad before it stages and finalizes the checkout,
+  # except a pull of the installed branch, staged at any vehicle state.
   return link_git_update_request(params) is not None
 
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:

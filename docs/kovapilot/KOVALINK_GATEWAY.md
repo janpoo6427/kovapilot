@@ -173,7 +173,7 @@ uv run --no-project --with pip python -m pip download --require-hashes \
 | `GET /v1/git/log?limit=20&cursor=0` | Current HEAD history and next offset |
 | `POST /v1/git/plan` | Validated switch or reset preview |
 | `POST /v1/git/switch`, `POST /v1/git/reset` | Operation-specific preview aliases |
-| `POST /v1/git/apply` | Queue a reviewed branch or commit for the updater (Park or offroad) |
+| `POST /v1/git/apply` | Queue a reviewed branch or commit for the updater (Park or offroad; a pull of the installed branch at any vehicle state) |
 | `POST /v1/device/restart` | Ask manager to reboot the device, at any time |
 
 Telemetry frames include `schemaVersion: 2`, `monotonicTimeNanos` and
@@ -204,10 +204,21 @@ longitudinal control released (the check Park settings use), updates not
 disabled, no update already waiting and an idle updater. Otherwise
 `mutationBlock` is `authorization` or `parkedOrUpdaterBusy` (gateways before
 2026-11-27 said `offroadOrUpdaterBusy` and required offroad). Many installs
-power the comma down with the ignition, so Park is enough. With a Link
-request queued or staged, manager keeps `updated` running with the vehicle on;
-it starts staging only offroad or in Park and fails the request if neither
-holds right before finalizing. Send the preview's operation, branch,
+power the comma down with the ignition, so Park is enough.
+A pull, a `switch` to the branch the comma is on (`branch` = `beforeBranch`,
+the newest commit of the installed branch), skips the vehicle check
+(janpoo6427 2026-11-28): status `pullEnabled` says whether the comma takes a
+pull now (authorization, updates not disabled, no update already waiting, an
+idle updater and no Link request), and its plan answers `mutationEnabled` the
+same way. Fetching origin refs (`/v1/git/branches`) never had a vehicle check.
+With a Link request queued or staged, manager keeps `updated` running with the
+vehicle on; for a branch switch or a reset it starts staging only offroad or
+in Park and fails the request if neither holds right before finalizing. A pull
+is staged at any vehicle state. Staging never changes the running checkout:
+`updated` fetches into the overlay and copies a finalized tree, and the launch
+script moves to it at the next start. While driving that fetch, copy and
+`git gc` still load the CPU and storage, and an AGNOS change is written to the
+other slot. Send the preview's operation, branch,
 optional reset commit and `planDigest` to `POST /v1/git/apply`. The server
 rechecks the installed checkout, clean worktree and fetched origin target.
 HTTP 202 returns the queued maintenance request. Status reports queued,

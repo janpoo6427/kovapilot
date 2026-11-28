@@ -24,7 +24,7 @@ from openpilot.kovapilot.config.kova_params import (
 )
 from openpilot.kovapilot.gateway.camera import camera_offer
 from openpilot.kovapilot.gateway.device_restart import DeviceRestart, RestartBlocked
-from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitPlanChanged, GitRepository
+from openpilot.kovapilot.gateway.git_maintenance import GitApplyBlocked, GitFetchError, GitMutationDisabled, GitPlanChanged, GitRepository
 from openpilot.kovapilot.gateway.lan import LAN_ACCESS_KEY, LAN_SOCKETS_KEY, LOOPBACK_GUARD_KEY, TAILNET_KEY, VIA_TAILNET
 from openpilot.kovapilot.gateway.native_longitudinal import KEY as NATIVE_LONGITUDINAL_KEY, NativeLongitudinal
 from openpilot.kovapilot.gateway.owner_pairing import OwnerPairing, PairingBlocked, PairingBusy, PairingCodeInvalid, PairingExpired
@@ -447,7 +447,9 @@ async def git_api(request):
 
 async def git_apply(request):
   repo = request.app.get(GIT_KEY)
-  if repo is None or not repo.can_apply(_git_authorized(request)):
+  # A pull (newest commit of the installed branch) is taken at any vehicle
+  # state; repo.apply checks Park or offroad for a branch switch or a reset.
+  if repo is None or not repo.can_apply(_git_authorized(request), pull=True):
     return _error(403, "git_mutation_disabled", "maintenance requires authorized access, Park or offroad, and an idle updater")
   lock = request.app[GIT_LOCK_KEY]
   if lock.locked():
@@ -461,6 +463,8 @@ async def git_apply(request):
       result = await asyncio.to_thread(repo.apply, body.get("operation"), body.get("branch"), body.get("commit"), body["planDigest"])
   except GitPlanChanged:
     return _error(409, "git_plan_changed", "refresh the preview before applying")
+  except GitMutationDisabled:
+    return _error(403, "git_mutation_disabled", "maintenance requires authorized access, Park or offroad, and an idle updater")
   except GitApplyBlocked:
     return _error(403, "git_apply_blocked", "the updater is busy or the working tree is not known and clean")
   except (ValueError, TypeError):

@@ -130,7 +130,9 @@ def test_updater_maintenance_is_allowed_offroad_or_parked_and_disengaged(monkeyp
 
 
 def test_updater_waits_while_driving_and_does_not_touch_the_checkout(monkeypatch):
-  job = {"operation": "switch", "branch": "main", "branchHead": "b" * 40, "commit": "b" * 40,
+  # A switch to another branch (a pull of the installed branch no longer waits,
+  # janpoo6427 2026-11-28; test_link_pull_any_state).
+  job = {"operation": "switch", "branch": "next", "branchHead": "b" * 40, "commit": "b" * 40,
          "beforeHead": "a" * 40, "beforeBranch": "main", "phase": "queued"}
   params = FakeParams(IsOffroad=False, **{GIT_UPDATE_KEY: job})
   updater = updater_with(params, None)

@@ -8,7 +8,7 @@ import re
 import subprocess
 from time import monotonic
 
-from openpilot.kovapilot.config.git_update_request import ACTIVE_PHASES, PLAN_FIELDS, describe_request
+from openpilot.kovapilot.config.git_update_request import ACTIVE_PHASES, PLAN_FIELDS, describe_request, is_pull
 
 
 # Leave headroom before the existing Link client's eight-second timeout.
@@ -28,21 +28,30 @@ class GitApplyBlocked(ValueError):
   pass
 
 
+class GitMutationDisabled(GitApplyBlocked):
+  """This change needs Park or offroad (or this client is not authorized)."""
+
+
 class GitRepository:
   def __init__(self, path, updater_state=lambda: None, *, maintenance_state=lambda: None,
-               apply_allowed=lambda: False, enqueue=None):
+               apply_allowed=lambda: False, pull_allowed=None, enqueue=None):
     self.path = path
     self.updater_state = updater_state
     self.maintenance_state = maintenance_state
     self.apply_allowed = apply_allowed
+    # A pull (newest commit of the installed branch) uses this rule instead of
+    # apply_allowed when given: the gateway passes the updater checks without
+    # the vehicle check (janpoo6427 2026-11-28). None keeps apply_allowed.
+    self.pull_allowed = pull_allowed
     self.enqueue = enqueue
 
   def pending(self):
     state = describe_request(self.maintenance_state())
     return state is not None and state["phase"] in ACTIVE_PHASES
 
-  def can_apply(self, authorized):
-    return authorized and self.enqueue is not None and not self.pending() and self.apply_allowed()
+  def can_apply(self, authorized, pull=False):
+    allowed = self.pull_allowed if pull and self.pull_allowed is not None else self.apply_allowed
+    return authorized and self.enqueue is not None and not self.pending() and allowed()
 
   def run(self, *args, check=True, timeout=3, deadline=None):
     if deadline is not None:
@@ -78,6 +87,7 @@ class GitRepository:
       "updaterState": self.updater_state(),
       "mutationEnabled": enabled,
       "mutationBlock": None if enabled or self.enqueue is None else ("parkedOrUpdaterBusy" if authorized else "authorization"),
+      "pullEnabled": self.can_apply(authorized, pull=True),
       "maintenance": pending,
       **({"dirty": True, "dirtyKnown": False} if self.pending() else self._worktree(self.run)),
     }
@@ -128,26 +138,30 @@ class GitRepository:
         raise ValueError("commit is outside the selected origin history")
 
     current = self._head(run)
+    pull = is_pull({"operation": operation, "branch": branch, "beforeBranch": current["branch"]})
     changed = run("diff", "--name-only", "-z", "--no-ext-diff", current["head"], commit, "--")
     plan = {"operation": operation, "branch": branch, "commit": commit, "branchHead": branch_head,
             "beforeHead": current["head"], "beforeBranch": current["branch"],
-            "requiresRestart": True, "mutationEnabled": self.can_apply(authorized),
+            "requiresRestart": True, "mutationEnabled": self.can_apply(authorized, pull=pull),
             **({"dirty": True, "dirtyKnown": False} if self.pending() else self._worktree(run))}
     plan["changedFileCount"] = changed.count("\0")
     plan["planDigest"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     return plan
 
   def apply(self, operation, branch, commit, digest):
-    if not self.can_apply(True):
-      raise GitApplyBlocked("maintenance needs Park or offroad and an idle updater")
+    if not self.can_apply(True, pull=True):
+      raise GitApplyBlocked("maintenance needs an idle updater")
     plan = self.plan(operation, branch, commit, authorized=True)
+    pull = is_pull(plan)
+    if not self.can_apply(True, pull=pull):
+      raise GitMutationDisabled("maintenance needs Park or offroad and an idle updater")
     if plan["dirty"] or not plan.get("dirtyKnown", True):
       raise GitApplyBlocked("working tree must be known and clean")
     if plan["planDigest"] != digest:
       raise GitPlanChanged("Git preview changed")
     if operation == "reset" and branch != plan["beforeBranch"]:
       raise GitApplyBlocked("reset must stay on the installed branch")
-    if not self.can_apply(True):
+    if not self.can_apply(True, pull=pull):
       raise GitApplyBlocked("maintenance needs Park or offroad and an idle updater")
     job = {**{key: plan[key] for key in PLAN_FIELDS}, "phase": "queued"}
     self.enqueue(job)

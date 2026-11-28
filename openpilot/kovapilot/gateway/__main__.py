@@ -74,6 +74,11 @@ def main() -> None:
     # KovaLink also work stopped in Park with openpilot disengaged.
     return is_offroad() or telemetry.is_parked_and_disengaged()
 
+  def link_updater_idle() -> bool:
+    return (not PC and not device_state_params.get_bool("DisableUpdates")
+            and not device_state_params.get_bool("UpdateAvailable")
+            and device_state_params.get("UpdaterState") == "idle")
+
   owner_pairing = None
   if not PC and lan is not None and lan[0].token_digest is None:
     owner_pairing = OwnerPairing(lan[0], is_offroad, partial(show_pairing_code, device_state_params))
@@ -89,10 +94,10 @@ def main() -> None:
                                            telemetry.is_parked_and_disengaged),
     git=GitRepository(BASEDIR, lambda: device_state_params.get("UpdaterState"),
                       maintenance_state=lambda: device_state_params.get(GIT_UPDATE_KEY),
-                      apply_allowed=lambda: (not PC and parked_or_offroad()
-                                             and not device_state_params.get_bool("DisableUpdates")
-                                             and not device_state_params.get_bool("UpdateAvailable")
-                                             and device_state_params.get("UpdaterState") == "idle"),
+                      apply_allowed=lambda: link_updater_idle() and parked_or_offroad(),
+                      # A pull (newest commit of the installed branch) at any
+                      # vehicle state (janpoo6427 2026-11-28).
+                      pull_allowed=link_updater_idle,
                       enqueue=lambda job: device_state_params.put(GIT_UPDATE_KEY, job, block=True)),
     lan_access=lan[0] if lan else None,
     restart=DeviceRestart(partial(restart_allowed, PC),

@@ -18,7 +18,7 @@ from openpilot.common.markdown import parse_markdown
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import AGNOS, HARDWARE
-from openpilot.kovapilot.config.git_update_request import KEY as LINK_GIT_UPDATE, active_request
+from openpilot.kovapilot.config.git_update_request import KEY as LINK_GIT_UPDATE, active_request, is_pull
 from openpilot.kovapilot.config.parked_setting import PARKED_AND_DISENGAGED_SERVICES, parked_and_disengaged
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
@@ -443,7 +443,7 @@ class Updater:
 
     # Create the finalized, ready-to-swap update
     self.params.put("UpdaterState", "finalizing update...", block=True)
-    if link_request is not None and not self.link_maintenance_allowed():
+    if link_request is not None and not is_pull(link_request) and not self.link_maintenance_allowed():
       raise ValueError("Park or offroad maintenance ended")
     finalize_update(link_requested=link_request is not None)
     cloudlog.info("finalize success!")
@@ -477,7 +477,9 @@ class Updater:
         set_consistent_flag(False)
         finish("failed", "stagingMissing")
         return
-      if not self.link_maintenance_allowed():
+      # A pull is staged at any vehicle state (janpoo6427 2026-11-28); it never
+      # touches the running checkout, the comma moves to it on its next start.
+      if not is_pull(job) and not self.link_maintenance_allowed():
         return
       changes = run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1",
                      "--untracked-files=normal", "--ignore-submodules=none"], BASEDIR)
