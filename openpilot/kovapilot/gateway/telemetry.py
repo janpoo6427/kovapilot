@@ -74,8 +74,9 @@ def road_scene(sm, now_ns, auto_lane_change_setting: int | None = None):
   }
   if math.isfinite(car.steeringAngleDeg):
     scene["steeringAngleDegrees"] = car.steeringAngleDeg
-  if math.isfinite(car.vCruise) and 0 < car.vCruise < 250:
-    scene["setSpeedMps"] = car.vCruise / 3.6
+  # the set speed the driver set and the cluster shows (vCruise is the planner set speed in wheel speed units)
+  if math.isfinite(car.vCruiseCluster) and 0 < car.vCruiseCluster < 250:
+    scene["setSpeedMps"] = car.vCruiseCluster / 3.6
   if fresh_message(sm, now_ns, "selfdriveState"):
     scene["engaged"] = sm["selfdriveState"].enabled
   if fresh_message(sm, now_ns, "modelV2"):

@@ -1,5 +1,6 @@
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
+from openpilot.kovapilot.longitudinal.cluster_speed import cluster_speed
 from openpilot.kovapilot.longitudinal.cruise_accelerator_sync import CruiseAcceleratorSync
 from openpilot.selfdrive.car.cruise import IMPERIAL_INCREMENT, VCruiseHelper, V_CRUISE_MAX, V_CRUISE_MIN
 
@@ -29,7 +30,8 @@ class CruiseAcceleratorSyncBridge:
     V_CRUISE_MIN like the cruise buttons, and then follows the held pedal (janpoo 11/27 23:12)."""
     if self.cruise.CP.pcmCruise or not (CS.gasPressed and self.press_without_buttons and not self.held_buttons):
       return
-    speed_kph = CS.vEgo * CV.MS_TO_KPH
+    # the current speed on the cluster, like the set speed (janpoo 11/28 10:39)
+    speed_kph = cluster_speed(CS) * CV.MS_TO_KPH
     if is_metric:
       target_kph = float(round(speed_kph))
     else:
@@ -79,7 +81,7 @@ class CruiseAcceleratorSyncBridge:
       can_arm=stock or CC.longActive,
       pressed=CS.gasPressed,
       speed_kph=CS.vEgo * CV.MS_TO_KPH,
-      release_speed_kph=(CS.vEgoCluster if stock else CS.vEgo) * CV.MS_TO_KPH,
+      release_speed_kph=(CS.vEgoCluster if stock else cluster_speed(CS)) * CV.MS_TO_KPH,
       set_speed_kph=self.cruise.v_cruise_cluster_kph if stock else self.cruise.v_cruise_kph,
       step_kph=step_kph,
       max_speed_kph=V_CRUISE_MAX,

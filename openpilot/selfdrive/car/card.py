@@ -212,7 +212,7 @@ class Car:
     self._update_cruise_accelerator_sync(CS, CC, can_rcv_valid, is_metric)
 
     # TODO: mirror the carState.cruiseState struct?
-    CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
+    CS.vCruise = float(self.v_cruise_helper.planner_v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, RD

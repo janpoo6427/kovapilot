@@ -3,6 +3,7 @@ import numpy as np
 
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
+from openpilot.kovapilot.longitudinal.cluster_speed import ClusterSpeedRatio, cluster_speed
 
 
 # WARNING: this value was determined based on the model's training distribution,
@@ -35,13 +36,23 @@ class VCruiseHelper:
     self.v_cruise_kph_last = 0
     self.button_timers = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0}
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
+    # KOVA: v_cruise_kph is the set speed on the cluster; the planner gets it in wheel speed units (planner_v_cruise_kph)
+    self.cluster_ratio = ClusterSpeedRatio()
 
   @property
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
+  @property
+  def planner_v_cruise_kph(self) -> float:
+    """carState.vCruise: the set speed in wheel speed units (the PCM already reports cruiseState.speed in them)."""
+    if self.CP.pcmCruise:
+      return self.v_cruise_kph
+    return self.cluster_ratio.planner_kph(self.v_cruise_kph)
+
   def update_v_cruise(self, CS, enabled, is_metric):
     self.v_cruise_kph_last = self.v_cruise_kph
+    self.cluster_ratio.update(CS.vEgo, cluster_speed(CS))
 
     if CS.cruiseState.available:
       if not self.CP.pcmCruise:
@@ -104,9 +115,9 @@ class VCruiseHelper:
     else:
       self.v_cruise_kph += v_cruise_delta * CRUISE_INTERVAL_SIGN[button_type]
 
-    # If set is pressed while overriding, clip cruise speed to minimum of vEgo
+    # If set is pressed while overriding, clip cruise speed to minimum of the cluster speed
     if CS.gasPressed and button_type in (ButtonType.decelCruise, ButtonType.setCruise):
-      self.v_cruise_kph = max(self.v_cruise_kph, CS.vEgo * CV.MS_TO_KPH)
+      self.v_cruise_kph = max(self.v_cruise_kph, cluster_speed(CS) * CV.MS_TO_KPH)
 
     self.v_cruise_kph = np.clip(round(self.v_cruise_kph, 1), V_CRUISE_MIN, V_CRUISE_MAX)
 
@@ -130,6 +141,6 @@ class VCruiseHelper:
     if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_initialized:
       self.v_cruise_kph = self.v_cruise_kph_last
     else:
-      self.v_cruise_kph = int(round(np.clip(max(CS.vEgo * CV.MS_TO_KPH, initial_speed), V_CRUISE_INITIAL, V_CRUISE_MAX)))
+      self.v_cruise_kph = int(round(np.clip(max(cluster_speed(CS) * CV.MS_TO_KPH, initial_speed), V_CRUISE_INITIAL, V_CRUISE_MAX)))
 
     self.v_cruise_cluster_kph = self.v_cruise_kph

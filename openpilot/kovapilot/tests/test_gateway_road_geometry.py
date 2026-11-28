@@ -31,7 +31,7 @@ def _scene(model):
     alive = valid
     logMonoTime = {"carState": 1_000_000_000, "selfdriveState": 1_000_000_000, "modelV2": 1_000_000_000}
 
-  car = SimpleNamespace(vEgo=20., steeringAngleDeg=0., vCruise=100., gearShifter="drive", leftBlinker=False,
+  car = SimpleNamespace(vEgo=20., steeringAngleDeg=0., vCruise=100., vCruiseCluster=100., gearShifter="drive", leftBlinker=False,
                         rightBlinker=False, brakePressed=False, leftBlindspot=False, rightBlindspot=False)
   return road_scene(Sample(carState=car, selfdriveState=SimpleNamespace(enabled=True), modelV2=model), 1_000_000_001)
 

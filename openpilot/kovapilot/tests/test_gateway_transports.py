@@ -212,7 +212,7 @@ def test_scene_omits_stale_sources_and_converts_cruise_speed():
     alive = valid
     logMonoTime = {"carState": 1_000_000_000, "selfdriveState": 1, "modelV2": 1}
 
-  sm = Sample(carState=SimpleNamespace(vEgo=10., steeringAngleDeg=4., vCruise=72., gearShifter="drive",
+  sm = Sample(carState=SimpleNamespace(vEgo=10., steeringAngleDeg=4., vCruise=72., vCruiseCluster=72., gearShifter="drive",
                                       leftBlinker=True, rightBlinker=False, brakePressed=False))
   scene = road_scene(sm, 1_000_000_001)
   assert scene["setSpeedMps"] == 20

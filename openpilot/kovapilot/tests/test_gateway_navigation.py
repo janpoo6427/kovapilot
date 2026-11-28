@@ -105,7 +105,7 @@ def test_scene_carries_navigation_only_while_navcamd_publishes():
     alive = valid
     logMonoTime = {"carState": SEC, "selfdriveState": 1, "modelV2": 1, "kovaNavigation": SEC}
 
-  car = SimpleNamespace(vEgo=10., steeringAngleDeg=4., vCruise=72., gearShifter="drive", leftBlinker=False,
+  car = SimpleNamespace(vEgo=10., steeringAngleDeg=4., vCruise=72., vCruiseCluster=72., gearShifter="drive", leftBlinker=False,
                         rightBlinker=False, brakePressed=False, leftBlindspot=False, rightBlindspot=False)
   sm = Sample(carState=car, kovaNavigation=navigation_reader(guided_state()))
   scene = road_scene(sm, SEC + 1, 0)

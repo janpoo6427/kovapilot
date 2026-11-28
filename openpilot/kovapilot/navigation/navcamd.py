@@ -274,7 +274,7 @@ class Network:
 def _advertisement(version: str, sm, nav: NavCamera, ip: str) -> bytes:
   state = sm["carState"]
   return advertisement(version=version, onroad=True, ip=ip, v_ego_kph=int(state.vEgoCluster * 3.6 + 0.5),
-                       v_cruise_kph=float(state.vCruise), cruise_speed_kph=float(state.cruiseState.speed * 3.6),
+                       v_cruise_kph=float(state.vCruiseCluster), cruise_speed_kph=float(state.cruiseState.speed * 3.6),
                        active=bool(sm["selfdriveState"].active), sdi_dist=nav.app.tracker.nearest_distance(nav.odo_m))
 
 
