@@ -9,6 +9,9 @@ This runtime owns the openpilot side, which must stay within that permission:
 - disarm (needs a new request): LFA button again, P or R, a system or steering fault (as
   openpilot would soft or immediately disable), terminal driver monitoring alert or lockout,
   or panda safety blocking our steering frames.
+- alert: turned off by the driver (LFA button, or a gear change to N, P or R) it shows the small
+  "Always-on Steering Off" with the short disengage sound; any other cause, also a real fault at the
+  same moment as a gear change, warns with "TAKE CONTROL" (janpoo 11/28).
 - pause (resumes by itself): regen braking, driver steering until released, and in controlsd
   standstill and steering faults that openpilot only warns about. The brake pedal ends cruise
   (longitudinal) only; steering continues while the driver brakes.
@@ -32,6 +35,9 @@ NOT_LATERAL_EVENTS = frozenset((
   EventName.speedTooLow, EventName.belowEngageSpeed, EventName.wrongCarMode, EventName.wrongCruiseMode,
   EventName.resumeBlocked, EventName.buttonCancel, EventName.pedalPressed,
 ))
+# Gears the driver selects to leave Drive: their own SOFT_DISABLE (wrongGear) is the gear change, not a fault.
+GEAR_CHANGE_GEARS = (GearShifter.neutral, GearShifter.park, GearShifter.reverse)
+GEAR_CHANGE_EVENTS = frozenset((EventName.wrongGear,))
 # The driver must release the wheel this long before steering resumes.
 DRIVER_RELEASE_FRAMES = int(0.5 / DT_CTRL)
 # Panda safety blocking this many frames between two pandaStates while we steer means it
@@ -39,8 +45,8 @@ DRIVER_RELEASE_FRAMES = int(0.5 / DT_CTRL)
 TX_BLOCKED_LIMIT = 5
 
 
-def has_event_type(events, event_type: str) -> bool:
-  return any(event_type in EVENTS.get(name, {}) for name in events.names if name not in NOT_LATERAL_EVENTS)
+def has_event_type(events, event_type: str, ignored=frozenset()) -> bool:
+  return any(event_type in EVENTS.get(name, {}) for name in events.names if name not in NOT_LATERAL_EVENTS and name not in ignored)
 
 
 class AlwaysLateralRuntime:
@@ -83,6 +89,10 @@ class AlwaysLateralRuntime:
     park_or_reverse = CS.gearShifter in (GearShifter.park, GearShifter.reverse)
     rejected = self._safety_rejected(sm, self.active and not enabled)
     system_fault = has_event_type(events, ET.IMMEDIATE_DISABLE) or has_event_type(events, ET.SOFT_DISABLE)
+    # a gear change out of Drive with nothing else wrong at that moment (janpoo 11/28)
+    gear_change_only = (CS.gearShifter in GEAR_CHANGE_GEARS and not (dm_terminal or rejected) and
+                        not has_event_type(events, ET.IMMEDIATE_DISABLE, GEAR_CHANGE_EVENTS) and
+                        not has_event_type(events, ET.SOFT_DISABLE, GEAR_CHANGE_EVENTS))
 
     toggle_off = lfa_pressed and self.engaged
     request = cruise_engaged or (lfa_pressed and not self.engaged and not has_event_type(events, ET.NO_ENTRY))
@@ -104,6 +114,6 @@ class AlwaysLateralRuntime:
     if owner and not self.owner_prev:
       events.add(EventName.alwaysLateralEngaged)
     elif was_engaged and not self.engaged and not enabled:
-      user_off = toggle_off or park_or_reverse
+      user_off = toggle_off or gear_change_only
       events.add(EventName.alwaysLateralDisengaged if user_off else EventName.alwaysLateralUnavailable)
     self.owner_prev = owner
