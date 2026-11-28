@@ -16,7 +16,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 from openpilot.kovapilot.bridges.always_lateral_runtime import AlwaysLateralRuntime
-from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime
+from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime, without_brake_sounds
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
 from openpilot.kovapilot.config.longitudinal_personality import CruiseGapLevels, clamp_personality, get_longitudinal_personality
 
@@ -549,7 +549,7 @@ class SelfdriveD:
 
     return CS
 
-  def update_alerts(self, CS):
+  def update_alerts(self, CS, quiet_brake: bool = False):
     clear_event_types = set()
     if ET.WARNING not in self.state_machine.current_alert_types:
       clear_event_types.add(ET.WARNING)
@@ -559,6 +559,8 @@ class SelfdriveD:
     pers = LONGITUDINAL_PERSONALITY_MAP[self.personality]
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, [self.CP, CS, self.sm, self.is_metric,
                                                                                 self.state_machine.soft_disable_timer, pers])
+    if quiet_brake:
+      alerts = without_brake_sounds(alerts)
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
 
@@ -606,11 +608,15 @@ class SelfdriveD:
       lateral_engaged=self.always_lateral is not None and self.always_lateral.engaged,
     ):
       self.events.add(EventName.buttonEnable)
+    was_enabled = self.enabled
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
     if self.always_lateral is not None:
       self.always_lateral.update(CS, self.sm, self.events, self.enabled)
-    self.update_alerts(CS)
+    # KOVA: with the automatic engagement on, the brake ending cruise plays no sound
+    quiet_brake = self.auto_engage is not None and self.auto_engage.quiet_brake_disengage(
+      CS, self.events, was_enabled=was_enabled, enabled=self.enabled)
+    self.update_alerts(CS, quiet_brake)
 
     self.publish_selfdriveState(CS)
 

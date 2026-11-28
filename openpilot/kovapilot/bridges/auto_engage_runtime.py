@@ -1,3 +1,4 @@
+import copy
 from math import isfinite
 
 from opendbc.car.structs import car
@@ -9,7 +10,7 @@ from openpilot.kovapilot.engagement.auto_engage import AutoEngage, AutoEngageInp
 from openpilot.kovapilot.engagement.pedal_resume import PedalResume, PedalResumeInputs
 from openpilot.kovapilot.vehicle.pedal_resume import pedal_resume_enabled
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
-from openpilot.selfdrive.selfdrived.events import ET, EVENTS
+from openpilot.selfdrive.selfdrived.events import ET, EVENT_NAME, EVENTS, AudibleAlert
 
 
 IGNORED_MODES = (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput)
@@ -26,10 +27,27 @@ PEDAL_PRESSED = log.OnroadEvent.EventName.pedalPressed
 # The saved preference is re-read while driving. Turning it off stops any later
 # automatic start at once; turning it on only arms the next departure from Park.
 PREFERENCE_POLL_NS = 1_000_000_000
+# With the automatic engagement on, the brake press that ends cruise is part of pedal driving (pedal resume
+# engages again at the release): its disengage sound and the always-on steering takeover sound of the same
+# moment are left out (janpoo 11/28 11:09). Their alerts are still shown; every other alert keeps its sound.
+QUIET_BRAKE_ALERT_TYPES = frozenset((
+  f"{EVENT_NAME[log.OnroadEvent.EventName.pedalPressed]}/{ET.USER_DISABLE}",
+  f"{EVENT_NAME[log.OnroadEvent.EventName.alwaysLateralEngaged]}/{ET.PERMANENT}",
+))
 
 
 def contains_except(events, event_type: str, ignored) -> bool:
   return any(event_type in EVENTS.get(name, {}) for name in events.names if name != ignored)
+
+
+def without_brake_sounds(alerts):
+  quiet = []
+  for alert in alerts:
+    if alert.alert_type in QUIET_BRAKE_ALERT_TYPES and alert.audible_alert != AudibleAlert.none:
+      alert = copy.copy(alert)  # the alert definitions are shared
+      alert.audible_alert = AudibleAlert.none
+    quiet.append(alert)
+  return quiet
 
 
 def has_control_authority(cp, pandas) -> bool:
@@ -69,6 +87,21 @@ class AutoEngageRuntime:
     # pedal resume: re-engage on the driver's brake release or accelerator press (panda ALT_EXP_PEDAL_RESUME)
     self.pedal = PedalResume() if self.supported and pedal_resume_enabled(cp) else None
     self.disengage_on_accelerator = False
+
+  @property
+  def resumes_on_pedal(self) -> bool:
+    # the automatic engagement is on and pedal resume (panda flag set at the start) engages again
+    return self.pedal is not None and self.requested
+
+  def quiet_brake_disengage(self, cs, events, *, was_enabled: bool, enabled: bool) -> bool:
+    """This step ended cruise by the brake pedal alone, with the automatic engagement on."""
+    if not (self.resumes_on_pedal and was_enabled and not enabled and cs.brakePressed):
+      return False
+    # a fault at the same moment keeps every sound
+    if events.contains(ET.IMMEDIATE_DISABLE) or events.contains(ET.SOFT_DISABLE):
+      return False
+    disables = {name for name in events.names if ET.USER_DISABLE in EVENTS.get(name, {})}
+    return disables == {PEDAL_PRESSED}
 
   def _start_session(self, session: int, now_ns: int) -> None:
     self.session = session
