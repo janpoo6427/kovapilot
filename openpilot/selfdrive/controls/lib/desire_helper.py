@@ -57,6 +57,9 @@ class DesireHelper:
         # KOVA: a side-lane radar object blocks like the blind spot (cars whose radar is used; nothing without radar)
         if alc is not None and alc.radar_occupied(self.lane_change_direction):
           blindspot_detected = True
+        # KOVA: the stock rear cell (CAN-FD CCNC_0x162, stock HDA on) blocks the same way; nothing without trusted cells
+        if alc is not None and alc.rear_cell_occupied(self.lane_change_direction):
+          blindspot_detected = True
 
         if not one_blinker or below_lane_change_speed or lane_change_disabled:
           self.lane_change_state = LaneChangeState.off

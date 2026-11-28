@@ -12,6 +12,12 @@ radar lane change block (kovapilot/lateral/auto_lane_change.py) and the radar cu
   lane between the current lane lines; tracks in neither (on a line) or without lane lines are not sent
 Coordinates as the app frame: distanceMeters = radar dRel (front bumper to the vehicle rear), leftMeters = radar yRel
 (left positive), relativeSpeedMps = radar vRel.
+
+On cars that send the stock rear cells (carState.sideCells, Hyundai CAN-FD CCNC_0x162) a car in the left or right rear
+cell is added while the cells are trusted (side_cells_trusted: stock HDA on, frames fresh; janpoo 2026-11-28 "4. 응").
+The cell distance is approximate (no speed, ends at 25.0 m), so these are marked approximate and placed simply: one
+REAR_CELL_VEHICLE_LENGTH car whose front is the cell distance behind an REAR_CELL_EGO_LENGTH ego, in the middle of the
+next lane (REAR_CELL_LEFT), relative speed 0, no moving flag. Their ids are negative (radar track ids never are).
 """
 import math
 
@@ -19,11 +25,35 @@ import numpy as np
 
 from openpilot.kovapilot.config.parked_setting import fresh_message
 from openpilot.kovapilot.lateral.auto_lane_change import (RADAR_HOLD_FRAMES, RADAR_TO_CAMERA, radar_object_stationary,
-                                                          radar_points, side_radar_objects)
+                                                          radar_points, rear_cell, side_cells_trusted, side_radar_objects)
 from openpilot.kovapilot.longitudinal.radar_cut_in import CUT_IN_MAX_DIST
 
 LANE_EGO, LANE_LEFT, LANE_RIGHT = "ego", "left", "right"
 SIDE_LANES = ((0, LANE_LEFT), (1, LANE_RIGHT))  # auto_lane_change side order
+REAR_CELL_IDS = (-1, -2)  # left, right rear cell
+REAR_CELL_EGO_LENGTH = 5.0  # m, approximate: the app measures from the front bumper, the cell from the rear
+REAR_CELL_VEHICLE_LENGTH = 4.6  # m, the app's default vehicle length
+REAR_CELL_LEFT = 3.5  # m from the ego centre to the middle of the next lane (the raw cell lateral is not used)
+
+
+def rear_cell_objects(sm, now_ns) -> list[dict]:
+  """Cars in the stock rear cells for `objects`; empty without fresh carState or trusted cells."""
+  if not fresh_message(sm, now_ns, "carState"):
+    return []
+  car = sm["carState"]
+  if not side_cells_trusted(car):
+    return []
+  objects = []
+  for side, lane in SIDE_LANES:
+    cell = rear_cell(car, side)
+    distance = float(cell.distance)
+    if not cell.detected or not math.isfinite(distance) or distance < 0.0:
+      continue
+    objects.append({"id": REAR_CELL_IDS[side], "kind": "vehicle",
+                    "distanceMeters": round(-(REAR_CELL_EGO_LENGTH + distance + REAR_CELL_VEHICLE_LENGTH), 2),
+                    "leftMeters": REAR_CELL_LEFT if side == 0 else -REAR_CELL_LEFT, "relativeSpeedMps": 0.0,
+                    "lengthMeters": REAR_CELL_VEHICLE_LENGTH, "lane": lane, "isLead": False, "approximate": True})
+  return objects
 
 
 def _lane_lines(model):
@@ -68,12 +98,20 @@ class RadarObjects:
     self.seen = {}
 
   def __call__(self, sm, now_ns) -> list[dict] | None:
-    """The `objects` list, or None to leave it out (no current, error free radar tracks). Never raises."""
+    """The `objects` list, or None to leave it out (no current, error free radar tracks and no rear cell car). Never
+    raises."""
     try:
-      return self._objects(sm, now_ns)
+      objects = self._objects(sm, now_ns)
     except Exception:
       self.reset()
-      return None
+      objects = None
+    try:
+      rear = rear_cell_objects(sm, now_ns)
+    except Exception:
+      rear = []
+    if not rear:
+      return objects
+    return sorted((objects or []) + rear, key=lambda o: o["distanceMeters"])
 
   def _objects(self, sm, now_ns):
     points = radar_points(sm) if fresh_message(sm, now_ns, "radarTracks") else None

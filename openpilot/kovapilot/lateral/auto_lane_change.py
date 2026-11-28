@@ -33,7 +33,16 @@ whose radar is used. An object standing still (RADAR_STATIONARY_SPEED: guard rai
 while it is within RADAR_NEAR_DIST of the front bumper; moving objects also while closing in. Cars without radar tracks, or
 with stale or faulted radar data, use the other sources only. The front radar sees the side lane ahead of and beside the
 front of the car only; behind it is the blind-spot monitor.
+
+On cars that send the stock camera's surrounding-vehicle cells (carState.sideCells, Hyundai CAN-FD CCNC_0x162, flag
+CANFD_SIDE_CELLS) the rear cell of the target side also blocks like a blind-spot warning (RearCellSource): a car in it
+within REAR_CELL_NEAR_DIST, or closing in to it within REAR_CELL_HORIZON at the closing speed from the cell distance,
+for REAR_CELL_HOLD_FRAMES. The cells are trusted only while the stock HDA is on (CCNC_0x161 HDA_ICON >= 1) and both
+frames are fresh (0.2 s): with the stock HDA off the camera leaves them empty even with a car there (IONIQ 9 rlogs
+2026-11-28). An empty cell never counts as a clear side, the front cells are not used, and fast cars from behind stay
+with the blind-spot monitor. Untrusted or missing cells change no decision (janpoo 2026-11-28 23:35, 11-29 01:07).
 """
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -81,6 +90,14 @@ RADAR_CLEAR_TIME = 1.0  # s the side must have been clear of radar objects befor
 RADAR_STATIONARY_SPEED = 2.0  # m/s
 
 # Going back to the original lane
+# Stock rear cells (RearCellSource). The rear cell has no speed and its distance ends at 25.0 m; the closing speed is the
+# distance change over REAR_CELL_RATE_FRAMES with the cell detected in every frame (0.5 s, so 0.65 s with the hold).
+# Thresholds from the IONIQ 9 replay of 108 segments (vault 2026-11-28-CORNER-RADAR-PLAN G): 3 m, 3 s, 0.15 s.
+REAR_CELL_HDA_MIN = 1  # CCNC_0x161 HDA_ICON: 0 = stock HDA off, the cells are not filled
+REAR_CELL_NEAR_DIST = 3.0  # m as the stock camera reports it
+REAR_CELL_HORIZON = 3.0  # s
+REAR_CELL_HOLD_FRAMES = 3  # model frames (0.15 s)
+REAR_CELL_RATE_FRAMES = 10  # model frames (0.5 s)
 CROSSED_JUMP = 1.5  # m: the current-lane centre jumps by about a lane width when the model relabels the lines
 CROSSED_OFFSET = 0.5  # m past the line towards the target lane
 RETURN_LOOKAHEAD_TIME = 1.2  # s
@@ -294,6 +311,70 @@ class RadarTrackSource:
     return SideReport(self.name, True, occupied, not occupied and self.clear_frames[side] * DT_MDL >= RADAR_CLEAR_TIME)
 
 
+def side_cells_trusted(CS) -> bool:
+  """carState.sideCells can be used: the car sends them, both frames are fresh and the stock HDA is on."""
+  cells = getattr(CS, "sideCells", None)
+  if cells is None:
+    return False
+  try:
+    return bool(cells.available) and bool(cells.fresh) and int(cells.hdaIcon) >= REAR_CELL_HDA_MIN
+  except (AttributeError, TypeError, ValueError):
+    return False
+
+
+def rear_cell(CS, side: int):
+  """The stock rear cell on that side (0 left, 1 right)."""
+  cells = CS.sideCells
+  return cells.leftRear if side == 0 else cells.rightRear
+
+
+def rear_cell_closing(distances) -> float:
+  """m/s the rear cell car closes in, from the first and last of REAR_CELL_RATE_FRAMES + 1 distances in a row; 0 before."""
+  if len(distances) < REAR_CELL_RATE_FRAMES + 1:
+    return 0.0
+  return (distances[0] - distances[-1]) / (REAR_CELL_RATE_FRAMES * DT_MDL)
+
+
+def rear_cell_blocks(distances) -> bool:
+  """Within REAR_CELL_NEAR_DIST now, or closing in to it within REAR_CELL_HORIZON."""
+  if not distances:
+    return False
+  distance = distances[-1]
+  closing = rear_cell_closing(distances)
+  return distance <= REAR_CELL_NEAR_DIST or (closing > 0.0 and distance - closing * REAR_CELL_HORIZON <= REAR_CELL_NEAR_DIST)
+
+
+class RearCellSource:
+  """The stock rear cells (carState.sideCells) on cars that send them. A side is occupied while its rear cell has blocked
+  (rear_cell_blocks) for REAR_CELL_HOLD_FRAMES. Only blocks: an empty cell is not a clear side (ready follows the
+  other sources). Without trusted cells (side_cells_trusted) it has no data and changes no decision."""
+  name = "rear_cells"
+
+  def __init__(self):
+    self.available = False
+    self.distances = [deque(maxlen=REAR_CELL_RATE_FRAMES + 1), deque(maxlen=REAR_CELL_RATE_FRAMES + 1)]
+    self.hold = [0, 0]
+    self.occupied = [False, False]
+
+  def update(self, CS) -> None:
+    self.available = side_cells_trusted(CS)
+    for side in (0, 1):
+      blocks = False
+      if self.available and rear_cell(CS, side).detected:
+        self.distances[side].append(float(rear_cell(CS, side).distance))
+        blocks = rear_cell_blocks(self.distances[side])
+      else:
+        self.distances[side].clear()
+      self.hold[side] = self.hold[side] + 1 if blocks else 0
+      self.occupied[side] = self.hold[side] >= REAR_CELL_HOLD_FRAMES
+
+  def report(self, CS, side: int) -> SideReport:
+    if not self.available:
+      return SideReport(self.name, False)
+    occupied = self.occupied[side]
+    return SideReport(self.name, True, occupied, not occupied)
+
+
 def side_lane_clear(reports) -> tuple[bool, str]:
   """Combine the sources for one side. (start allowed, reason). The blind-spot monitor must have data; any
   available source that says occupied blocks; every available source must be ready."""
@@ -358,7 +439,8 @@ class AutoLaneChange:
     self.blindspot = BlindSpotSource(self.supported)
     self.model_lane = ModelLaneSource()
     self.radar = RadarTrackSource(not getattr(CP, "radarUnavailable", True))
-    self.sources = (self.blindspot, self.model_lane, self.radar)
+    self.rear_cells = RearCellSource()
+    self.sources = (self.blindspot, self.model_lane, self.radar, self.rear_cells)
     self.CS = None
     self.engaged = False
     self.dm_ok = False
@@ -403,7 +485,7 @@ class AutoLaneChange:
     dm = sm["driverMonitoringState"]
     self.dm_ok = dm.disableReason != DmDisableReason.none or dm.alertLevel == log.DriverMonitoringState.AlertLevel.none
     for source in self.sources:
-      if source is self.blindspot:
+      if source is self.blindspot or source is self.rear_cells:
         source.update(CS)
       elif source is self.model_lane:
         source.update(model, CS.vEgo)
@@ -464,9 +546,14 @@ class AutoLaneChange:
     """The radar sees an object in the lane on that side: blocks the start like a blind-spot warning, nudge included."""
     return direction != LaneChangeDirection.none and self.radar.available and self.radar.occupied[_side(direction)]
 
+  def rear_cell_occupied(self, direction) -> bool:
+    """The stock rear cell on that side holds a near or closing car: blocks the start like a blind-spot warning."""
+    return direction != LaneChangeDirection.none and self.rear_cells.available and self.rear_cells.occupied[_side(direction)]
+
   def lane_change_blocked(self, lane_change_state, direction) -> bool:
     """For modelV2.meta.kovaLaneChangeBlocked (the stock laneChangeBlocked alert) after DesireHelper.update()."""
-    return lane_change_state == LaneChangeState.preLaneChange and self.radar_occupied(direction)
+    return lane_change_state == LaneChangeState.preLaneChange and (self.radar_occupied(direction) or
+                                                                    self.rear_cell_occupied(direction))
 
   def speed_min(self, default: float) -> float:
     return min(default, AUTO_LANE_CHANGE_MIN_SPEED) if self.enabled and self.engaged else default
