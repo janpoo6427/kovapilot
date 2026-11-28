@@ -12,6 +12,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
+from openpilot.kovapilot.longitudinal.radar_cut_in import RadarCutIn
 
 
 # Default lead acceleration decay set to 50% at 1s
@@ -151,7 +152,7 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
 
 
 def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
-             model_v_ego: float, lead_prob: float, low_speed_override: bool = True) -> dict[str, Any]:
+             model_v_ego: float, lead_prob: float, low_speed_override: bool = True, cut_in: Track | None = None) -> dict[str, Any]:
   # Determine leads, this is where the essential logic happens
   if len(tracks) > 0 and ready and lead_prob > .5:
     track = match_vision_to_track(v_ego, lead_msg, tracks)
@@ -163,6 +164,10 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
     lead_dict = track.get_RadarState(lead_prob)
   elif (track is None) and ready and (lead_prob > .5):
     lead_dict = get_RadarState_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
+
+  # KOVA: a radar track entering our path from a side lane (radar_cut_in.py) leads before the model reports it
+  if cut_in is not None and ((not lead_dict["present"]) or cut_in.dRel < lead_dict["dRel"]):
+    lead_dict = cut_in.get_RadarState()
 
   if low_speed_override:
     low_speed_tracks = [c for c in tracks.values() if c.potential_low_speed_lead(v_ego)]
@@ -190,6 +195,7 @@ class RadarD:
     self.radar_state_valid = False
 
     self.ready = False
+    self.cut_in = RadarCutIn()
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
@@ -238,7 +244,9 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
+      cut_in_id = self.cut_in.update(sm.logMonoTime["modelV2"] * 1e-9, self.tracks, sm["modelV2"], self.v_ego, rr.errors) if self.ready else None
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True,
+                                          cut_in=self.tracks.get(cut_in_id) if cut_in_id is not None else None)
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False)
 
   def publish(self, pm: messaging.PubMaster):
