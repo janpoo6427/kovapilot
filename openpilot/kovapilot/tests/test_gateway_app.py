@@ -7,7 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from openpilot.kovapilot.config.cruise_sync_settings import read_cruise_sync_settings
 from openpilot.kovapilot.config.kova_params import CRUISE_SYNC_KEY, CRUISE_SYNC_SHADOW_KEY, CURVE_SLOWDOWN_KEY, KOVA_PARAMS_KEY, KovaParamsStore
-from openpilot.kovapilot.config.kova_params import AUTO_ENGAGE_KEY, LEAD_RESTART_KEY
+from openpilot.kovapilot.config.kova_params import AUTO_ENGAGE_KEY
 from openpilot.kovapilot.gateway.app import create_app
 from openpilot.kovapilot.gateway import lan
 from openpilot.kovapilot.gateway.git_maintenance import GitRepository
@@ -59,36 +59,21 @@ def test_auto_engage_is_saved_while_driving_and_shows_both_axes():
   asyncio.run(check())
 
 
-def test_lead_restart_reports_saved_profile_and_applied_native_state():
-  applied, capability = None, "pendingRestart"
-  app = create_app(
-    KovaParamsStore(MemoryBackend()), lambda: False,
-    applied_lead_restart_provider=lambda: applied,
-    dependency_conditions=lambda: {"openpilotLongitudinalApplied": capability, "openpilotCruiseSpeedOwner": capability},
-  )
+def test_lead_restart_setting_removed_and_old_saved_value_ignored():
+  # cruise.lead_restart_response was replaced by the driving personality (kovapilot/config/personality_weights.py)
+  backend = MemoryBackend()
+  backend.value = {"schemaVersion": 1, "revision": 2, "values": {"cruise.lead_restart_response": 3}}
+  app = create_app(KovaParamsStore(backend), lambda: True)
 
   async def check():
-    nonlocal applied, capability
     async with TestClient(TestServer(app)) as client:
-      response = await client.post("/v1/kova-params/update", json={"key": LEAD_RESTART_KEY, "value": 3, "expectedRevision": 0})
+      response = await client.get("/v1/kova-params")
       assert response.status == 200
-      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
-      assert setting["options"] == [0, 1, 2, 3]
-      assert [setting["optionTitles"][str(option)]["ko"] for option in setting["options"]] == ["끔", "느리게", "보통", "빠르게"]
-      assert setting["value"] == 3
-      assert setting["applyState"] == "awaitingStart"
-      assert setting["dependencies"][0]["state"] == "pendingRestart"
-
-      applied, capability = 0, "met"
-      response = await client.get("/v1/kova-params")
-      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
-      assert setting["appliedValue"] == 0
-      assert setting["applyState"] == "pendingParked"
-
-      applied = 3
-      response = await client.get("/v1/kova-params")
-      setting = next(item for item in (await response.json())["settings"] if item["key"] == LEAD_RESTART_KEY)
-      assert (setting["value"], setting["appliedValue"], setting["applyState"]) == (3, 3, "applied")
+      document = await response.json()
+      assert document["revision"] == 2
+      assert "cruise.lead_restart_response" not in {item["key"] for item in document["settings"]}
+      response = await client.post("/v1/kova-params/update", json={"key": "cruise.lead_restart_response", "value": 1, "expectedRevision": 2})
+      assert response.status == 400
 
   asyncio.run(check())
 

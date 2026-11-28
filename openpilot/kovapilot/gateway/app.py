@@ -15,7 +15,6 @@ from openpilot.kovapilot.config.kova_params import (
   AUTO_ENGAGE_KEY,
   CRUISE_SYNC_KEY,
   CURVE_SLOWDOWN_KEY,
-  LEAD_RESTART_KEY,
   NAV_TURN_SLOWDOWN_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsReadOnlyError,
@@ -43,7 +42,6 @@ APPLIED_CURVE_PROVIDER_KEY = web.AppKey("applied_curve_provider", Callable[[], i
 APPLIED_NAV_TURN_PROVIDER_KEY = web.AppKey("applied_nav_turn_provider", Callable[[], int | str | None])
 # The two switches of the curve slowdown item, applied the same way by plannerd.
 CURVE_PROVIDER_KEYS = {CURVE_SLOWDOWN_KEY: APPLIED_CURVE_PROVIDER_KEY, NAV_TURN_SLOWDOWN_KEY: APPLIED_NAV_TURN_PROVIDER_KEY}
-APPLIED_LEAD_RESTART_PROVIDER_KEY = web.AppKey("applied_lead_restart_provider", Callable[[], int | None])
 APPLIED_AUTO_ENGAGE_PROVIDER_KEY = web.AppKey("applied_auto_engage_provider", Callable[[], dict | None])
 DEPENDENCY_CONDITIONS_KEY = web.AppKey("dependency_conditions", Callable[[], dict[str, str]])
 TELEMETRY_KEY = web.AppKey("telemetry", Callable)
@@ -129,10 +127,6 @@ def _with_device_state(request: web.Request, document: dict[str, Any], device_st
         else:
           setting["appliedValue"] = applied
           setting["applyState"] = "applied" if applied == setting["value"] else "pendingParked"
-    elif setting["key"] == LEAD_RESTART_KEY:
-      provider = request.app.get(APPLIED_LEAD_RESTART_PROVIDER_KEY)
-      if provider is None:
-        setting["applyState"] = "awaitingStart"
     elif setting["key"] == AUTO_ENGAGE_KEY:
       auto_engage_provider = request.app.get(APPLIED_AUTO_ENGAGE_PROVIDER_KEY)
       auto_engage = auto_engage_provider() if auto_engage_provider is not None else None
@@ -493,7 +487,6 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
                applied_cruise_provider: Callable[[], int | None] | None = None,
                applied_curve_provider: Callable[[], int | str | None] | None = None,
                applied_nav_turn_provider: Callable[[], int | str | None] | None = None,
-               applied_lead_restart_provider: Callable[[], int | None] | None = None,
                applied_auto_engage_provider: Callable[[], dict | None] | None = None,
                dependency_conditions: Callable[[], dict[str, str]] | None = None,
                telemetry=None, camera=None, git=None, lan_access=None, native_longitudinal=None,
@@ -509,8 +502,6 @@ def create_app(store: KovaParamsStore, offroad_provider: OffroadProvider, *, par
     app[APPLIED_CURVE_PROVIDER_KEY] = applied_curve_provider
   if applied_nav_turn_provider is not None:
     app[APPLIED_NAV_TURN_PROVIDER_KEY] = applied_nav_turn_provider
-  if applied_lead_restart_provider is not None:
-    app[APPLIED_LEAD_RESTART_PROVIDER_KEY] = applied_lead_restart_provider
   if applied_auto_engage_provider is not None:
     app[APPLIED_AUTO_ENGAGE_PROVIDER_KEY] = applied_auto_engage_provider
   if dependency_conditions is not None:

@@ -7,12 +7,6 @@ MIN_DEPARTURE_M = 0.8
 MIN_DEPARTURE_MPS = 0.35
 MAX_STOPPED_LEAD_SPEED_MPS = 0.25
 
-# The profiles share the same departure evidence. Only the reaction changes.
-PROFILES = {
-  1: (650_000_000, 0.45),
-  2: (300_000_000, 0.75),
-  3: (0, 1.15),
-}
 
 
 @dataclass(frozen=True)
@@ -24,9 +18,14 @@ class LeadObservation:
 
 
 class LeadRestartResponse:
-  def __init__(self, profile: int):
-    self.delay_ns, self.jerk = PROFILES[profile]
+  """Every reaction shares the same departure evidence. Only the reaction (hold ns, ramp m/s^3) changes; it comes
+  from the driving personality (kovapilot/config/personality_weights.py LEAD_RESTART_REACTION)."""
+  def __init__(self, reaction: tuple[int, float]):
+    self.set_reaction(reaction)
     self.reset()
+
+  def set_reaction(self, reaction: tuple[int, float]) -> None:
+    self.delay_ns, self.jerk = reaction
 
   def reset(self) -> None:
     self.track: LeadObservation | None = None

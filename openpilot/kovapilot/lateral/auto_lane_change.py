@@ -1,7 +1,9 @@
 """KOVA auto lane change (steering.auto_lane_change).
 
 Off (the default) leaves the stock openpilot DesireHelper exactly as it is: the driver turns on a blinker and nudges
-the wheel. On, a lane change also starts without the nudge AUTO_START_DELAY after the driver turns on one blinker when
+the wheel. On, a lane change also starts without the nudge a start delay after the driver turns on one blinker (by driving
+personality, kovapilot/config/personality_weights.py LANE_CHANGE_START_DELAY_S: 0.7 / 1.0 / 1.3 / 1.5 s for distance
+levels 1-4, standard 1.0 s; the blind-spot and model lane checks below do not follow the personality) when
 
   * openpilot is engaged (cruise; not always-on steering alone),
   * the speed is at least AUTO_LANE_CHANGE_MIN_SPEED,
@@ -24,6 +26,7 @@ import numpy as np
 from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.kovapilot.config.personality_weights import LANE_CHANGE_START_DELAY_S, personality_value
 
 AUTO_LANE_CHANGE_KEY = "steering.auto_lane_change"
 AutoState = log.KovaAutoLaneChange
@@ -32,7 +35,6 @@ LaneChangeState = log.LaneChangeState
 DmDisableReason = log.DriverMonitoringState.DisableReason
 
 AUTO_LANE_CHANGE_MIN_SPEED = 30 * CV.KPH_TO_MS  # one constant, to be tuned after car tests
-AUTO_START_DELAY = 1.0  # s after the blinker comes on
 BLINDSPOT_CLEAR_TIME = 1.0  # s the blind spot must have been clear
 SIDE_LANE_MIN_WIDTH = 2.5  # m from the current lane line to the next line and to the road edge
 SIDE_LANE_HOLD = 0.2  # s
@@ -67,6 +69,17 @@ def read_auto_lane_change(params) -> bool:
     return KovaParamsStore(ParamsKovaParamsBackend(params)).values()[AUTO_LANE_CHANGE_KEY] == 1
   except Exception:
     return False
+
+
+def current_personality(sm):
+  """selfdriveState.personality once selfdrived has published it; None (standard) before that or without it."""
+  seen = getattr(sm, "seen", None)
+  try:
+    if seen is not None and not seen["selfdriveState"]:
+      return None
+    return sm["selfdriveState"].personality
+  except KeyError:
+    return None
 
 
 def _side(direction) -> int:
@@ -216,6 +229,7 @@ class AutoLaneChange:
     self.v_ego = 0.0
     self.blinker_frames = 0
     self.blinker_dir = LaneChangeDirection.none
+    self.start_delay = personality_value(LANE_CHANGE_START_DELAY_S, None)  # s after the blinker comes on
     self.used = False  # this blinker started an automatic lane change
     self.cancelled = False  # braking or opposite steering since this blinker came on
     self.reason = ""
@@ -247,6 +261,7 @@ class AutoLaneChange:
     self.lane_change_prob = lane_change_prob
     self.poll_setting(lane_change_state == LaneChangeState.off and not self.returning)
     self.engaged = bool(sm["carControl"].enabled)
+    self.start_delay = personality_value(LANE_CHANGE_START_DELAY_S, current_personality(sm))
     dm = sm["driverMonitoringState"]
     self.dm_ok = dm.disableReason != DmDisableReason.none or dm.alertLevel == log.DriverMonitoringState.AlertLevel.none
     for source in self.sources:
@@ -309,7 +324,7 @@ class AutoLaneChange:
     clear, reason = side_lane_clear(self.reports(direction))
     if not clear:
       return reason
-    if self.blinker_frames * DT_MDL < AUTO_START_DELAY:
+    if self.blinker_frames * DT_MDL < self.start_delay:
       return "delay"
     return ""
 

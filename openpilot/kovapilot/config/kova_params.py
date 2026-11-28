@@ -22,13 +22,16 @@ NAV_TURN_SLOWDOWN_KEY = "cruise.nav_turn_slowdown"
 CAMERA_PROFILE_KEY = "navigation.speed_camera_profile"
 ROAD_LIMIT_PROFILE_KEY = "navigation.road_speed_limit_profile"
 SPEED_BUMP_PROFILE_KEY = "navigation.speed_bump_profile"
-LEAD_RESTART_KEY = "cruise.lead_restart_response"
 CRUISE_SYNC_KEY = "cruise.accelerator_sync"
 CRUISE_SYNC_SHADOW_KEY = "cruise.accelerator_sync_stock_shadow"
 LEGACY_PARAM_KEYS = {
   CRUISE_SYNC_KEY: "CruiseAcceleratorSync",
   CRUISE_SYNC_SHADOW_KEY: "CruiseAcceleratorSyncStockShadow",
 }
+# Settings that were removed from the catalog. A saved value is ignored when read and dropped when the store is next
+# initialized or written. cruise.lead_restart_response: following a stopped lead away now follows the driving
+# personality (kovapilot/config/personality_weights.py).
+RETIRED_KEYS = frozenset({"cruise.lead_restart_response"})
 CATALOG_PATH = Path(__file__).with_name("kova_params.json")
 
 
@@ -279,15 +282,23 @@ class KovaParamsStore:
       raise KovaParamsValidationError("stored KovaParams has an unsupported schemaVersion")
     revision = state.get("revision")
     values = state.get("values")
+    if isinstance(values, dict) and not RETIRED_KEYS.isdisjoint(values):
+      values = {key: value for key, value in values.items() if key not in RETIRED_KEYS}
+      state = {**state, "values": values}
     if type(revision) is not int or revision < 0 or not isinstance(values, dict) or not set(values).issubset(self._settings):
       raise KovaParamsValidationError("stored KovaParams has an invalid revision or value set")
     return deepcopy(state)
+
+  def _stored_retired_keys(self) -> bool:
+    state = self._backend.get(KOVA_PARAMS_KEY)
+    values = state.get("values") if isinstance(state, dict) else None
+    return isinstance(values, dict) and not RETIRED_KEYS.isdisjoint(values)
 
   def initialize_storage(self) -> None:
     """Persist numeric settings before the manager starts their consumers."""
     with self._lock:
       state = self._read_state()
-      changed = state is None
+      changed = state is None or self._stored_retired_keys()
       if state is None:
         if isinstance(self._backend, ParamsKovaParamsBackend) and self._backend.has_saved_settings():
           raise KovaParamsValidationError("stored KovaParams could not be decoded")

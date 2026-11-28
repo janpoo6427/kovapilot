@@ -1,12 +1,25 @@
 from math import isfinite
 
 from openpilot.kovapilot.config.parked_setting import fresh_message
+from openpilot.kovapilot.config.personality_weights import LEAD_RESTART_REACTION, personality_value
 from openpilot.kovapilot.longitudinal.lead_restart import LeadObservation, LeadRestartResponse
 
 
 class LeadRestartRuntime:
-  def __init__(self, profile: int):
-    self.response = LeadRestartResponse(profile)
+  def __init__(self):
+    self.response: LeadRestartResponse | None = None
+
+  def select(self, personality) -> bool:
+    """Follow the driving personality. False: no lead restart limit for it (the planner as it is); the departure
+    state starts over the next time a personality with a reaction is selected."""
+    reaction = personality_value(LEAD_RESTART_REACTION, personality)
+    if reaction is None:
+      self.response = None
+    elif self.response is None:
+      self.response = LeadRestartResponse(reaction)
+    else:
+      self.response.set_reaction(reaction)
+    return self.response is not None
 
   @staticmethod
   def _observation(sm, now_ns: int) -> LeadObservation | None:

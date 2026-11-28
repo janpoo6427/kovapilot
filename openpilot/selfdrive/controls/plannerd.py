@@ -15,7 +15,6 @@ from openpilot.kovapilot.bridges.lead_restart_runtime import LeadRestartRuntime
 from openpilot.kovapilot.bridges.nav_turn_runtime import NavTurnRuntime
 from openpilot.kovapilot.config.curve_slowdown_settings import CurveSlowdownPreference, publish_applied_curve_slowdown
 from openpilot.kovapilot.config.kova_params import CURVE_SLOWDOWN_KEY, NAV_TURN_SLOWDOWN_KEY
-from openpilot.kovapilot.config.lead_restart_settings import LeadRestartPreference, publish_applied_lead_restart
 from openpilot.kovapilot.longitudinal.curve_slowdown import CurveLimits, MIN_MOVING_SPEED_MPS
 from openpilot.kovapilot.longitudinal.nav_turn import NAVIGATION_SERVICE
 from openpilot.kovapilot.navigation.camera_profile import STOCK_NAVI_DECEL_MPS2
@@ -31,13 +30,6 @@ def _report_curve_setting(enabled: bool, supported: bool, key: str = CURVE_SLOWD
     publish_applied_curve_slowdown(enabled, supported=supported, key=key)
   except OSError:
     cloudlog.exception("failed to publish applied curve slowdown setting")
-
-
-def _report_lead_restart(profile: int) -> None:
-  try:
-    publish_applied_lead_restart(profile)
-  except OSError:
-    cloudlog.exception("failed to publish applied lead restart response")
 
 
 def main():
@@ -80,18 +72,15 @@ def main():
   curve_limits = CurveLimits(decel_mps2=-A_CRUISE_MIN, jerk_mps3=min(J_CRUISE_VALS), response_s=CRUISE_ACCEL_RESPONSE_TIME + delay,
                              min_turn_speed_mps=MIN_MOVING_SPEED_MPS)
   restart_supported = longitudinal_supported and not CP.pcmCruise and not CP.notCar
-  restart_preference = LeadRestartPreference(params) if restart_supported else None
-  lead_restart = None
-  if restart_supported:
-    _report_lead_restart(0)
+  # Following a stopped lead away follows the driving personality (kovapilot/config/personality_weights.py).
+  lead_restart_runtime = LeadRestartRuntime() if restart_supported else None
 
   while True:
     sm.update()
     if sm.updated['modelV2']:
       now_ns = time.monotonic_ns()
-      if restart_preference is not None and (restart_profile := restart_preference.poll(sm, now_ns)) is not None:
-        lead_restart = LeadRestartRuntime(restart_profile) if restart_profile else None
-        _report_lead_restart(restart_profile)
+      lead_restart = (lead_restart_runtime if lead_restart_runtime is not None and
+                      lead_restart_runtime.select(sm["selfdriveState"].personality) else None)
       if curve_preference is not None and (enabled := curve_preference.poll(sm, now_ns)) is not None:
         curve = CurveRuntime(curve_limits) if enabled else None
         _report_curve_setting(enabled, True)

@@ -9,7 +9,6 @@ from openpilot.kovapilot.config.kova_params import (
   CRUISE_SYNC_KEY,
   CRUISE_SYNC_SHADOW_KEY,
   CURVE_SLOWDOWN_KEY,
-  LEAD_RESTART_KEY,
   KOVA_PARAMS_KEY,
   KovaParamsApplyPolicyError,
   KovaParamsRevisionConflict,
@@ -77,7 +76,7 @@ def test_storage_initialization_saves_legacy_values_as_numbers_once():
 
   store.initialize_storage()
   values = {
-    "steering.always_on": 1, CRUISE_SYNC_KEY: 0, CRUISE_SYNC_SHADOW_KEY: 1, CURVE_SLOWDOWN_KEY: 1, LEAD_RESTART_KEY: 0,
+    "steering.always_on": 1, CRUISE_SYNC_KEY: 0, CRUISE_SYNC_SHADOW_KEY: 1, CURVE_SLOWDOWN_KEY: 1,
     AUTO_ENGAGE_KEY: 0, "steering.auto_lane_change": 0, "navigation.auto_blinker": 0,
     BRIGHTNESS_MODE_KEY: 1, "navigation.speed_camera_profile": 2, "display.onroad_brightness_fixed": 75,
     "power.auto_power_off_minutes": 1440,
@@ -137,7 +136,6 @@ def test_offroad_update_is_revisioned_and_persisted_synchronously():
       "navigation.speed_camera_profile": 0,
       CRUISE_SYNC_KEY: 0, CRUISE_SYNC_SHADOW_KEY: 0,
       CURVE_SLOWDOWN_KEY: 0,
-      LEAD_RESTART_KEY: 0,
       AUTO_ENGAGE_KEY: 0, "steering.auto_lane_change": 0, "navigation.auto_blinker": 0,
       "power.auto_power_off_minutes": 1440,
       "navigation.road_speed_limit_profile": 0, "navigation.speed_bump_profile": 0, "cruise.nav_turn_slowdown": 0,
