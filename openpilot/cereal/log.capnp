@@ -1148,6 +1148,7 @@ struct ModelDataV2 {
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
     kovaAutoLaneChange @10 :KovaAutoLaneChange;
+    kovaLaneChangeBlocked @11 :Bool;  # KOVA: the side radar blocks this lane change (preLaneChange), laneChangeBlocked alert
 
 
     deprecated :group {

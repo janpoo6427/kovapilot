@@ -9,15 +9,21 @@ levels 1-4, standard 1.0 s; the blind-spot and model lane checks below do not fo
   * the speed is at least AUTO_LANE_CHANGE_MIN_SPEED,
   * the side lane is clear by every side-lane source (side_lane_clear): the car's blind-spot monitor is present, its
     frame is fresh and that side has been clear for BLINDSPOT_CLEAR_TIME, and the model has seen a lane there for
-    SIDE_LANE_HOLD; a radar-track source is wired in but has no data yet (RadarTrackSource),
+    SIDE_LANE_HOLD, and on cars whose radar is used (CarParams.radarUnavailable False) the radar has seen no object in
+    that lane near or closing (RadarTrackSource) for RADAR_CLEAR_TIME,
   * driver monitoring is off, or on and not warning,
   * the driver has not braked or steered the other way since the blinker came on, and this blinker has not already
     started an automatic lane change (one automatic lane change per blinker).
 
 Cars without a blind-spot monitor, or whose blind-spot frame stops, keep the nudge only. During an automatic lane
-change, a blind-spot warning on the target side, braking, steering the other way, disengaging or a stale blind-spot
-frame cancels it: before the car has crossed into the new lane it steers back to the centre of the original lane
-(return_curvature); once it has crossed, the lane change is left to finish in the new lane.
+change, a blind-spot warning or a radar object on the target side, braking, steering the other way, disengaging or a
+stale blind-spot frame cancels it: before the car has crossed into the new lane it steers back to the centre of the
+original lane (return_curvature); once it has crossed, the lane change is left to finish in the new lane.
+
+The radar object also blocks the driver's nudge exactly as a blind-spot warning does in stock openpilot (DesireHelper
+stays in preLaneChange, selfdrived shows the stock laneChangeBlocked alert through modelV2.meta.kovaLaneChangeBlocked),
+whether or not the automatic lane change setting is on. Cars without radar tracks keep everything as before. The front
+radar sees the side lane ahead of and beside the front of the car only; behind it is the blind-spot monitor's.
 """
 from dataclasses import dataclass
 
@@ -41,6 +47,18 @@ SIDE_LANE_HOLD = 0.2  # s
 SIDE_LANE_LOOKAHEAD = 1.0  # s ahead
 SIDE_EDGE_LOOKAHEAD = 2.0  # s ahead, road edge only
 SETTING_POLL_FRAMES = int(1.0 / DT_MDL)
+
+# Side-lane radar objects (radarTracks). Values from the 2026-11-28 IONIQ 9 drive 0000079f (front radar group 3): of the
+# 14 lane changes the driver made, the tightest side-lane objects were 3.5 m ahead moving away at 2.6 m/s and 10 m ahead
+# closing at 2.0 m/s; cars beside the front of the car (0-2 m) and slow traffic closing at 7-11 m/s were blocked.
+RADAR_TO_CAMERA = 1.52  # m, the radar is ahead of the model frame origin (selfdrive/controls/radard.py)
+RADAR_LANE_MIN = 0.5  # m: the object centre is at least this far past the current lane line towards that side
+RADAR_LANE_EXTRA = 1.0  # m: and at most the current lane width plus this past the line
+RADAR_LANE_WIDTH_MIN, RADAR_LANE_WIDTH_MAX = 2.5, 4.5  # m, clip of the current lane width used for the side lane
+RADAR_NEAR_DIST = 3.0  # m from the front bumper to the object rear (0 = beside the car)
+RADAR_HORIZON = 3.0  # s: blocks when nearer than RADAR_NEAR_DIST now or, at its relative speed, within this time
+RADAR_HOLD_FRAMES = 3  # model frames (0.15 s) one track must keep blocking before it counts
+RADAR_CLEAR_TIME = 1.0  # s the side must have been clear of radar objects before an automatic start, as the blind spot
 
 # Going back to the original lane
 CROSSED_JUMP = 1.5  # m: the current-lane centre jumps by about a lane width when the model relabels the lines
@@ -158,18 +176,75 @@ class ModelLaneSource:
     return SideReport(self.name, True, False, seen)
 
 
+def radar_points(sm):
+  """radarTracks points when they are current and the radar reports no error; None otherwise."""
+  try:
+    tracks = sm["radarTracks"]
+  except KeyError:
+    return None
+  alive = getattr(sm, "alive", None)
+  if alive is not None and not alive.get("radarTracks", False):
+    return None
+  errors = tracks.errors
+  if errors.canError or errors.radarFault or errors.wrongConfig or errors.radarUnavailableTemporary:
+    return None
+  return tracks.points
+
+
+def side_radar_objects(points, model, side: int) -> list[tuple[int, float, float, float]]:
+  """(trackId, dRel, vRel, lateral) of the points in the lane on that side of the current lane at their distance;
+  lateral is m past the current lane line towards that side. Radar yRel grows to the left, modelV2 y to the right."""
+  lines = model.laneLines
+  if len(lines) < 4 or len(lines[1].x) == 0 or len(lines[2].x) == 0:
+    return []
+  towards = -1.0 if side == 0 else 1.0
+  objects = []
+  for point in points:
+    x = point.dRel + RADAR_TO_CAMERA
+    left, right = float(np.interp(x, lines[1].x, lines[1].y)), float(np.interp(x, lines[2].x, lines[2].y))
+    width = float(np.clip(abs(right - left), RADAR_LANE_WIDTH_MIN, RADAR_LANE_WIDTH_MAX))
+    lateral = towards * (-point.yRel - (left if side == 0 else right))
+    if RADAR_LANE_MIN <= lateral <= width + RADAR_LANE_EXTRA:
+      objects.append((point.trackId, point.dRel, point.vRel, lateral))
+  return objects
+
+
+def radar_object_blocks(d_rel: float, v_rel: float) -> bool:
+  """Nearer than RADAR_NEAR_DIST now, or at this relative speed within RADAR_HORIZON (time to RADAR_NEAR_DIST)."""
+  return d_rel < RADAR_NEAR_DIST or (v_rel < 0.0 and d_rel + v_rel * RADAR_HORIZON < RADAR_NEAR_DIST)
+
+
 class RadarTrackSource:
-  """Place for side radar tracks (radarState side leads / liveTracks) once kovapilot has them. Until then it never
-  has data, so it never changes a decision. A future source reports per side: the nearest vehicle's longitudinal
-  distance, relative speed and lateral distance, and marks the side occupied by the rule in the vault plan
-  ('레이더 트랙 보완 준비')."""
+  """Side-lane objects from the car radar (radarTracks) on cars whose radar is used. A side is occupied while one track
+  in that lane has been near or closing (radar_object_blocks) for RADAR_HOLD_FRAMES; ready once it has been clear for
+  RADAR_CLEAR_TIME. Without radar, or with stale or faulted radar data, it has no data and changes no decision."""
   name = "radar_tracks"
 
-  def update(self, sm) -> None:
-    pass
+  def __init__(self, has_radar: bool = False):
+    self.has_radar = has_radar
+    self.available = False
+    self.hold: list[dict[int, int]] = [{}, {}]  # trackId -> model frames it has blocked in a row
+    self.occupied = [False, False]
+    self.clear_frames = [0, 0]
+
+  def update(self, sm, model=None) -> None:
+    points = radar_points(sm) if self.has_radar and model is not None else None
+    self.available = points is not None
+    for side in (0, 1):
+      hold = {}
+      if points is not None:
+        for track_id, d_rel, v_rel, _ in side_radar_objects(points, model, side):
+          if radar_object_blocks(d_rel, v_rel):
+            hold[track_id] = self.hold[side].get(track_id, 0) + 1
+      self.hold[side] = hold
+      self.occupied[side] = any(frames >= RADAR_HOLD_FRAMES for frames in hold.values())
+      self.clear_frames[side] = self.clear_frames[side] + 1 if self.available and not self.occupied[side] else 0
 
   def report(self, CS, side: int) -> SideReport:
-    return SideReport(self.name, False)
+    if not self.available:
+      return SideReport(self.name, False)
+    occupied = self.occupied[side]
+    return SideReport(self.name, True, occupied, not occupied and self.clear_frames[side] * DT_MDL >= RADAR_CLEAR_TIME)
 
 
 def side_lane_clear(reports) -> tuple[bool, str]:
@@ -186,6 +261,13 @@ def side_lane_clear(reports) -> tuple[bool, str]:
     if report.available and not report.ready:
       return False, report.source + "_wait"
   return True, "clear"
+
+
+def lane_change_blocked_alert(CS, meta) -> bool:
+  """selfdrived laneChangeBlocked during preLaneChange: the stock blind-spot check, or the side radar (modeld)."""
+  direction = meta.laneChangeDirection
+  return bool((CS.leftBlindspot and direction == LaneChangeDirection.left) or
+              (CS.rightBlindspot and direction == LaneChangeDirection.right) or meta.kovaLaneChangeBlocked)
 
 
 def lane_centre_offset(model) -> float | None:
@@ -221,7 +303,7 @@ class AutoLaneChange:
     self.poll_frame = 0
     self.blindspot = BlindSpotSource(self.supported)
     self.model_lane = ModelLaneSource()
-    self.radar = RadarTrackSource()
+    self.radar = RadarTrackSource(not getattr(CP, "radarUnavailable", True))
     self.sources = (self.blindspot, self.model_lane, self.radar)
     self.CS = None
     self.engaged = False
@@ -270,7 +352,7 @@ class AutoLaneChange:
       elif source is self.model_lane:
         source.update(model, CS.vEgo)
       else:
-        source.update(sm)
+        source.update(sm, model)
 
     one_blinker = CS.leftBlinker != CS.rightBlinker
     direction = (LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right) if one_blinker else LaneChangeDirection.none
@@ -297,6 +379,14 @@ class AutoLaneChange:
     return [source.report(self.CS, side) for source in self.sources]
 
   # ---- DesireHelper hooks
+  def radar_occupied(self, direction) -> bool:
+    """The radar sees an object in the lane on that side: blocks the start like a blind-spot warning, nudge included."""
+    return direction != LaneChangeDirection.none and self.radar.available and self.radar.occupied[_side(direction)]
+
+  def lane_change_blocked(self, lane_change_state, direction) -> bool:
+    """For modelV2.meta.kovaLaneChangeBlocked (the stock laneChangeBlocked alert) after DesireHelper.update()."""
+    return lane_change_state == LaneChangeState.preLaneChange and self.radar_occupied(direction)
+
   def speed_min(self, default: float) -> float:
     return min(default, AUTO_LANE_CHANGE_MIN_SPEED) if self.enabled and self.engaged else default
 
@@ -410,6 +500,6 @@ class AutoLaneChange:
     reason = self.block_reason(self.blinker_dir)
     if reason in ("", "delay"):
       return AutoState.pending
-    if reason in (BlindSpotSource.name + "_wait", ModelLaneSource.name + "_wait"):
+    if reason in (BlindSpotSource.name + "_wait", ModelLaneSource.name + "_wait", RadarTrackSource.name + "_wait"):
       return AutoState.waiting
     return AutoState.none

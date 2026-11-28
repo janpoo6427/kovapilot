@@ -50,6 +50,9 @@ class DesireHelper:
 
         blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
                               (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
+        # KOVA: a side-lane radar object blocks like the blind spot (cars whose radar is used; nothing without radar)
+        if alc is not None and alc.radar_occupied(self.lane_change_direction):
+          blindspot_detected = True
 
         if not one_blinker or below_lane_change_speed:
           self.lane_change_state = LaneChangeState.off

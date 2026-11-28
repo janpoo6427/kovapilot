@@ -316,7 +316,7 @@ def main(demo=False):
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutGpuState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
-                  "carControl", "controlsState", "lateralDelay", "selfdriveState"])
+                  "carControl", "controlsState", "lateralDelay", "selfdriveState", "radarTracks"])
 
   publish_state = PublishState()
   params = Params()
@@ -469,6 +469,7 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       modelv2_send.modelV2.meta.kovaAutoLaneChange = ALC.publish_state(DH.lane_change_state)
+      modelv2_send.modelV2.meta.kovaLaneChangeBlocked = ALC.lane_change_blocked(DH.lane_change_state, DH.lane_change_direction)
       return_curvature = ALC.return_curvature(modelv2_send.modelV2, v_ego)
       if return_curvature is not None:
         modelv2_send.modelV2.action.desiredCurvature = return_curvature

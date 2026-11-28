@@ -18,6 +18,7 @@ from openpilot.common.gps import get_gps_location_service
 from openpilot.kovapilot.bridges.always_lateral_runtime import AlwaysLateralRuntime
 from openpilot.kovapilot.bridges.auto_engage_runtime import AutoEngageRuntime, without_brake_sounds
 from openpilot.kovapilot.bridges.driver_monitoring import monitoring_is_disabled
+from openpilot.kovapilot.lateral.auto_lane_change import lane_change_blocked_alert
 from openpilot.kovapilot.config.longitudinal_personality import CruiseGapLevels, clamp_personality, get_longitudinal_personality
 
 from openpilot.selfdrive.car.car_events import CarEvents
@@ -336,8 +337,7 @@ class SelfdriveD:
       self.events.add(EventName.autoLaneChange)
     elif self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection
-      if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
-         (CS.rightBlindspot and direction == LaneChangeDirection.right):
+      if lane_change_blocked_alert(CS, self.sm['modelV2'].meta):
         self.events.add(EventName.laneChangeBlocked)
       elif auto_lane_change != log.KovaAutoLaneChange.none:
         self.events.add(EventName.autoLaneChange)
